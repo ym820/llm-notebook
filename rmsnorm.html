@@ -150,34 +150,31 @@
       </div>
       <p class="toy"><b>Toy:</b> one token (cat), 4 sublayers. Every sublayer is the same fixed map \(F(x)=2Px\), where \(P\) shifts each dimension one place to the right, so \(\mathrm{RMS}(F(x))=2\,\mathrm{RMS}(x)\). \(g=1\).<br><b>Yours:</b> 4 blocks, so 8 sublayers, each an attention or a SwiGLU with learned weights.</p>
 
+      <div class="prose">
+        <p>Every sublayer adds something to the residual stream. This ablation asks what keeps that stream under control, and there are three answers: nothing, a norm after the addition, or a norm before the sublayer. Use the switch above while you read. The numbers below come from it.</p>
+      </div>
+
       <div class="sub">No norm</div>
-      <div class="lines">
-        <p><b>Rule</b>: \(x \leftarrow x + F(x)\). Nothing ever resets the size of \(x\).</p>
-        <p><b>Forward</b>: a sublayer's output is proportional to its input, so sizes multiply. Toy RMS per layer: <span id="seqNo"></span>.</p>
-        <p><b>Feedback loop</b>: the gradient of a weight is proportional to the activation it multiplies. Larger weights give larger activations, then larger gradients, then a larger weight update.</p>
-        <p><b>In training</b>: a high LR starts that loop. Yours: NaN at 3e-3 and 1e-3, stuck near 7.46 at 3e-4, trains only at 1e-4.</p>
-        <p><b>Verdict</b>: trains only at an LR 30× below the baseline's best, and is worse even there (2.08 vs 1.80 at the same LR).</p>
+      <div class="prose">
+        <p>Start with the simplest design, \(x \leftarrow x + F(x)\), and ask what happens to the size of \(x\). A sublayer is mostly matrix multiplications, so if you double its input you roughly double its output. The amount added at each layer is therefore proportional to what is already there, and sizes compound like interest. In the toy, the RMS goes <span id="seqNo"></span> in four layers.</p>
+        <p>Now think about training. The gradient of a weight is the activation it multiplies, times the signal coming back from above. So large activations mean large gradients, large gradients mean a large update, and a large update makes the weights larger, which makes the next activations larger still. Nothing in the model pushes back. A small learning rate keeps you out of this loop. A large one drops you into it.</p>
+        <p>That is your sweep: NaN at 3e-3 and 1e-3, stuck near 7.46 at 3e-4, and only 1e-4 trains. Even there you pay for it, with 2.08 against 1.80 for the baseline at the same learning rate.</p>
       </div>
 
       <div class="sub">Post-norm</div>
-      <div class="lines">
-        <p><b>Rule</b>: \(x \leftarrow \mathrm{Norm}(x + F(x))\). The size is reset after every sublayer.</p>
-        <p><b>Forward</b>: solved. Toy RMS per layer: <span id="seqPost"></span>.</p>
-        <p><b>Backward</b>: the "+" sits inside the norm. A gradient going down is rescaled by a norm at every sublayer, 8 times in your model. No route avoids them.</p>
-        <p><b>Known problem</b>: at the start of training, gradients for the layers near the output are large (Xiong et al. 2020). Large gradient × large LR = unstable first steps. This is why the 2017 Transformer needs LR warm-up.</p>
-        <p><b>In training</b>: fine at a moderate LR, fragile at a high one. Yours: almost the baseline curve at 3e-3, stuck near 6 at 1e-2.</p>
-        <p><b>Verdict</b>: works, but the usable LR range is narrower.</p>
+      <div class="prose">
+        <p>The obvious fix is to normalize after every addition: \(x \leftarrow \mathrm{Norm}(x + F(x))\). This is what the original Transformer did in 2017. The forward pass is now safe. Whatever the sublayer adds, the stream is put back to RMS 1 before the next layer sees it: <span id="seqPost"></span>.</p>
+        <p>The trouble is in the backward pass. Look at where the "+" is: inside the norm. In a residual network, the "+" is what lets a gradient travel from the loss down to the first layer without being altered. Here that route goes through a norm at every sublayer, eight of them in your model, and each one rescales the gradient by an amount that depends on the current weights. Xiong et al. (2020) worked out the consequence: at the start of training, the layers near the output receive large gradients. Multiply a large gradient by a large learning rate and the first few steps can wreck the model. This is why post-norm Transformers are trained with learning rate warm-up.</p>
+        <p>Your runs show it. At 3e-3, post-norm is almost indistinguishable from the baseline. At 1e-2 it sits near 6 for most of training, while the pre-norm baseline at 1e-2 reaches 1.36. So post-norm works, but only inside a narrower range of learning rates.</p>
       </div>
 
       <div class="sub">Pre-norm</div>
-      <div class="lines">
-        <p><b>Rule</b>: \(x \leftarrow x + F(\mathrm{Norm}(x))\). Only the sublayer's input is normalized.</p>
-        <p><b>Forward</b>: the sublayer always sees RMS 1, so its output has a bounded size. The stream grows by adding, not multiplying. Toy RMS per layer: <span id="seqPre"></span>.</p>
-        <p><b>Backward</b>: the "+" is outside the norm. It copies the gradient straight down to every layer, with no norm on that route.</p>
-        <p><b>In training</b>: stable across LRs. Yours: 1.34 at 3e-3 and 1.36 at 1e-2.</p>
-        <p><b>Cost 1</b>: the stream is never normalized, so one extra norm is needed before the LM head.</p>
-        <p><b>Cost 2</b>: the stream keeps growing, so later sublayers change it less. Toy: update ÷ stream falls from <span id="rel1"></span> at layer 1 to <span id="rel4"></span> at layer 4.</p>
-        <p><b>Verdict</b>: the default in GPT-2, Llama, and your model. A forgiving LR and easy depth are worth more than the two costs.</p>
+      <div class="prose">
+        <p>Pre-norm takes the norm off the stream and puts it on the sublayer's input: \(x \leftarrow x + F(\mathrm{Norm}(x))\). That one move addresses both problems.</p>
+        <p>Take the forward pass first. The sublayer always sees an input with RMS 1, no matter how large the stream has become, so its output has a bounded size. The stream now grows by adding a bounded amount per layer, not by multiplying: <span id="seqPre"></span>. Compare the last number with no norm.</p>
+        <p>Then the backward pass. The "+" is outside the norm, so the gradient is copied straight down to every layer with nothing on that route. Each layer hears from the loss directly, plus whatever arrives through the sublayers above it. That is why your baseline is comfortable at both 3e-3 (1.34) and 1e-2 (1.36).</p>
+        <p>It is not free. First, nothing ever normalizes the stream itself, so you need one more norm before the LM head. That is your <code>ln_final</code>. Second, the stream keeps growing while each update stays the same size, so later layers change it proportionally less. In the toy, the update is <span id="rel1"></span> times the stream at layer 1 and <span id="rel4"></span> times at layer 4.</p>
+        <p>So which one do people use? Pre-norm. GPT-2 made the switch in 2019, and Llama and your model follow it. The reasoning is practical: when you stack many layers, you want a model that trains at whatever reasonable learning rate you pick, and one extra norm is a small price for that.</p>
       </div>
 
       <details class="aside"><summary>Formal version: no norm</summary>
