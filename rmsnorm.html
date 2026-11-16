@@ -136,7 +136,7 @@
   <!-- 5 -->
   <section class="node" data-id="ablation">
     <div class="node-head">
-      <button class="node-toggle" aria-expanded="true"><span class="node-n">5</span><span class="node-title">Ablation</span><span class="node-hint">no norm, post-norm</span></button>
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">5</span><span class="node-title">Ablation</span><span class="node-hint">no norm, post-norm, pre-norm</span></button>
       <button class="master">Mark mastered</button>
     </div>
     <div class="node-body"><div class="node-inner"><div class="node-pad">
@@ -150,10 +150,23 @@
       </div>
       <p class="toy"><b>Toy:</b> one token (cat), 4 sublayers. Every sublayer is the same fixed map \(F(x)=2Px\), where \(P\) shifts each dimension one place to the right, so \(\mathrm{RMS}(F(x))=2\,\mathrm{RMS}(x)\). \(g=1\).<br><b>Yours:</b> 4 blocks, so 8 sublayers, each an attention or a SwiGLU with learned weights.</p>
 
-      <div class="sub">No norm</div>
-      <div class="pairs">
-        <div class="pair-row"><div class="lab"><b>Diff</b><span>\(x+F(x)\)</span></div><div class="lines-code"><div class="cl"><span class="tag">base</span><code>x = x + self.attn(self.ln1(x), token_positions)</code></div><div class="cl"><span class="tag"></span><code>x = x + self.ffn(self.ln2(x))</code></div><div class="cl"><span class="tag">ablated</span><code>x = x + self.attn(x, token_positions)</code></div><div class="cl"><span class="tag"></span><code>x = x + self.ffn(x)</code></div></div></div>
+      <div class="sub">Trade-offs</div>
+      <table class="cmp">
+        <tr><th></th><th>Stream size after \(L\) sublayers</th><th>Gradient to an early layer</th><th>Cost</th><th>Used by</th></tr>
+        <tr><td><b>No norm</b></td><td>up to \((1+k)^L\,\|x_0\|\)</td><td>identity path, but nothing bounds the rest</td><td>only a small LR trains</td><td></td></tr>
+        <tr><td><b>Post-norm</b></td><td>RMS 1 at every layer</td><td>crosses every norm above it</td><td>sensitive to LR, needs warm-up</td><td>original Transformer (2017), BERT</td></tr>
+        <tr><td><b>Pre-norm</b></td><td>grows, at most linearly in \(L\)</td><td>identity path, sublayer inputs bounded</td><td>one extra final norm</td><td>GPT-2, Llama, your model</td></tr>
+      </table>
+      <div class="lines">
+        <p><b>Modern LLMs use pre-norm</b>, not post-norm. Post-norm is the 2017 design.</p>
+        <p><b>Why pre-norm wins</b>: it trains at a wide range of LRs and depths. Yours: 1.36 at LR 1e-2, where post-norm stalls near 6.</p>
+        <p><b>What pre-norm gives up</b>: the stream grows, so a later sublayer's update is a smaller share of it. Toy: update ÷ stream is <span id="rel1"></span> at layer 1 and <span id="rel4"></span> at layer 4.</p>
+        <p><b>What post-norm keeps</b>: every sublayer changes the stream by the same share. At a safe LR it matches pre-norm. Yours at 3e-3: almost the same curve.</p>
+        <p><b>Why no norm loses</b>: the stream's size is set by the weights alone, so one large step can blow it up. Yours: NaN at 1e-3 and above.</p>
       </div>
+      <details class="aside"><summary>Sources</summary>Post-norm with warm-up: Vaswani et al. 2017. Norm moved to the sublayer input plus a final norm: GPT-2, Radford et al. 2019.<br>Post-norm gradients at initialization and why it needs warm-up: Xiong et al. 2020, "On Layer Normalization in the Transformer Architecture".<br>Post-norm can end better than pre-norm when it trains: Liu et al. 2020, "Understanding the Difficulty of Training Transformers".</details>
+
+      <div class="sub">No norm: why it blows up</div>
       <p class="toy">Your <code class="i">no_norm</code> removes the two block norms. <code class="i">ln_final</code> still runs.</p>
       <ol class="derive">
         <li><div>
@@ -172,7 +185,7 @@
           <div class="why">Large scores push softmax to one-hot, the same failure \(\sqrt{d_k}\) guards against.</div>
         </div></li>
       </ol>
-      <div class="sub">Your result</div>
+      <div class="sub">Your result: no norm</div>
       <table class="blend">
         <tr><th>No norm, LR</th><th>Outcome</th></tr>
         <tr><td>3e-3</td><td>NaN</td></tr>
@@ -190,10 +203,7 @@
       <img class="plot" src="img/no-norm_ablation.png" alt="Validation loss: no norm at 1e-4 stays above the baseline at 1e-4, which stays above the baseline at 3e-3." loading="lazy">
       <p class="toy">Of the 0.74 gap to the best baseline: about 0.46 comes from the lower LR, about 0.28 from removing the norm.</p>
 
-      <div class="sub">Post-norm</div>
-      <div class="pairs">
-        <div class="pair-row"><div class="lab"><b>Diff</b><span>\(\mathrm{Norm}(x+F(x))\)</span></div><div class="lines-code"><div class="cl"><span class="tag">base</span><code>x = x + self.attn(self.ln1(x), token_positions)</code></div><div class="cl"><span class="tag"></span><code>x = x + self.ffn(self.ln2(x))</code></div><div class="cl"><span class="tag">ablated</span><code>x = self.ln1(x + self.attn(x, token_positions))</code></div><div class="cl"><span class="tag"></span><code>x = self.ln2(x + self.ffn(x))</code></div></div></div>
-      </div>
+      <div class="sub">Post-norm vs pre-norm: the gradient path</div>
       <ol class="derive">
         <li><div>
           <div class="what">Forward: the stream is renormalized after every sublayer</div>
@@ -216,7 +226,7 @@
           <details class="aside"><summary>Why</summary>From \(y_i=g_i u_i/r\) with \(r=\mathrm{RMS}(u)\) and \(\partial r/\partial u_j=u_j/(d_{model}\,r)\).<br>Two effects: it rescales the gradient by \(1/\mathrm{RMS}(u)\), and it removes the component along \(u\), since \(J_{\mathrm{Norm}}(u)\,u=0\).<br>Reference: Xiong et al. 2020, "On Layer Normalization in the Transformer Architecture".</details>
         </div></li>
       </ol>
-      <div class="sub">Your result</div>
+      <div class="sub">Your result: post-norm</div>
       <table class="blend">
         <tr><th>LR</th><th>Pre-norm (baseline)</th><th>Post-norm</th></tr>
         <tr><td>3e-3</td><td>1.3387</td><td>slightly above baseline at every eval</td></tr>
@@ -349,6 +359,9 @@ const TOP = max(MODES.flatMap(m => m.xs));
 console.assert(MODES[1].xs.slice(1).every(x => Math.abs(rms(x) - 1) < 1e-4), "post-norm stream must have RMS 1");
 console.assert(rms(MODES[2].xs[LAYERS]) > 3 * rms(MODES[0].xs[LAYERS]), "no-norm stream should outgrow pre-norm");
 
+// size of the sublayer's output relative to the stream it is added to
+const upd = (m, l) => rms(F(m === MODES[0] ? norm(m.xs[l - 1]) : m.xs[l - 1])) / rms(m.xs[l - 1]);
+$("rel1").textContent = f(upd(MODES[0], 1)); $("rel4").textContent = f(upd(MODES[0], LAYERS));
 let mode = 0, layer = 1;
 MODES.forEach((m, i) => {
   const b = document.createElement("button");
@@ -371,7 +384,7 @@ function renderStream() {
     : mode === 1 ? [`F(x<sub>${layer - 1}</sub>) = 2 × shift = ${v(F(x))}`, `u = x<sub>${layer - 1}</sub> + F(x<sub>${layer - 1}</sub>) = ${v(add(x, F(x)))}`, `x<sub>${layer}</sub> = u / RMS(u) = u / ${f(rms(add(x, F(x))))} = <b>${v(m.xs[layer])}</b>`]
     : [`F(x<sub>${layer - 1}</sub>) = 2 × shift = ${v(F(x))}`, `x<sub>${layer}</sub> = ${v(x)} + ${v(F(x))} = <b>${v(m.xs[layer])}</b>`];
   $("inspectStream").innerHTML = `<h4>x<sub>${layer - 1}</sub> → x<sub>${layer}</sub></h4><div class="calc">${lines.join("<br>")}</div>
-    <p class="defs">RMS: ${f(rms(x))} → <b>${f(rms(m.xs[layer]))}</b>. After ${LAYERS} layers: ${f(rms(m.xs[LAYERS]))}.<br>final = Norm(x<sub>${LAYERS}</sub>), what the LM head sees.</p>`;
+    <p class="defs">update ÷ stream = ${f(upd(m, layer))}.<br>RMS: ${f(rms(x))} → <b>${f(rms(m.xs[layer]))}</b>. After ${LAYERS} layers: ${f(rms(m.xs[LAYERS]))}.<br>final = Norm(x<sub>${LAYERS}</sub>), what the LM head sees.</p>`;
 }
 
 window.addEventListener("DOMContentLoaded", () => { render(); renderStream(); });

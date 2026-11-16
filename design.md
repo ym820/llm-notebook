@@ -42,7 +42,7 @@ Each chapter has five nodes, plus an Ablation node when the assignment ablates t
 2. **Derivation**: numbered steps, each a name plus a formula with shapes. The "why" is collapsed behind a toggle.
 3. **Worked example**: a stepper over one small matrix. Clicking a cell shows its arithmetic. A variant of the topic (for example two heads) gets a second, smaller stage under the first, reusing the same inputs.
 4. **Code**: one row per step, comparing Yikai's line with a reference line.
-5. **Ablation** (only where one exists): for each ablation, the code diff, a derivation of why the change matters, and Yikai's real result (numbers and plots in `img/`, downsized from the cs336 `images/`). One stage with a switch compares the variants on the same toy input. Ablations live in the chapter of the component they remove: no norm and post-norm in RMSNorm, SiLU in SwiGLU, NoPE in RoPE.
+5. **Ablation** (only where one exists): no code diffs. A trade-off table comparing the variants (stream size, gradient path, cost, which architectures use it), a few lines on which one modern models choose and why, a derivation of why each change matters, and Yikai's real result (numbers and plots in `img/`, downsized from the cs336 `images/`). One stage with a switch compares the variants on the same toy input. Ablations live in the chapter of the component they remove: no norm and post-norm in RMSNorm, SiLU in SwiGLU, NoPE in RoPE.
 6. **Self-check**: three questions with hidden answers, and a button to mark the chapter mastered. A "Test me first" link at the top jumps here.
 
 ## Conventions

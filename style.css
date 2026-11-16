@@ -198,3 +198,9 @@ div.cell { display: grid; place-items: center; }
 .plot { display: block; width: 100%; max-width: 640px; margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .node-pad > .pairs, .node-pad > .derive, .node-pad > .blend { margin-bottom: 8px; }
 @media (max-width: 860px) { .grid.c5 { grid-template-columns: 44px repeat(5, minmax(0, 1fr)); font-size: 12px; } }
+.cmp { border-collapse: collapse; font-size: 14px; margin: 4px 0 16px; width: 100%; }
+.cmp th { font-size: 12px; font-weight: 400; color: var(--muted); text-align: left; }
+.cmp th, .cmp td { padding: 8px 14px 8px 0; vertical-align: top; border-top: 1px dashed var(--line); }
+.cmp tr:first-child th { border-top: 0; }
+.cmp td:first-child { white-space: nowrap; }
+.node-pad > .lines { margin-bottom: 10px; }
