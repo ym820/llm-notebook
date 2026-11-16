@@ -141,7 +141,7 @@
     </div>
     <div class="node-body"><div class="node-inner"><div class="node-pad">
       <div class="stage" id="bars">
-        <div class="step-formula"><div id="barStep"></div><p>Bar height = RMS of the stream. Orange = growth in this layer.</p></div>
+        <div class="step-formula"><div id="barStep"></div><p class="legend"><span>Bar height = RMS of the stream</span><span><i class="sw old"></i>stream before this sublayer</span><span><i class="sw new"></i>growth from this sublayer</span></p></div>
         <div class="barrow" id="barrow"></div>
         <div class="stage-foot">
           <span class="kbd">← → change layer.</span>
@@ -377,8 +377,10 @@ function renderBars() {
     col.querySelector(".old").style.setProperty("--s", Math.min(prev, now) / TOPR);
     const num = col.querySelector(".barnum");
     num.textContent = f(now); num.style.setProperty("--s", now / TOPR);
-    col.querySelector(".barnote").textContent = !layer ? "start" :
-      `adds RMS ${f(upd(m, layer) * prev)}, ${f(upd(m, layer))}× the stream` + (i === 1 ? ", then reset to 1" : "");
+    // post-norm: show the size before Norm, since Norm's output always has RMS 1 (g = 1)
+    col.querySelector(".barnote").textContent = !layer ? "start" : i === 1
+      ? `grows to ${f(rms(add(m.xs[layer - 1], F(m.xs[layer - 1]))))}, then Norm rescales it to 1.00`
+      : `adds RMS ${f(upd(m, layer) * prev)}, ${f(upd(m, layer))}× the stream`;
   });
   $("bPrev").disabled = layer === 0; $("bNext").disabled = layer === LAYERS;
   $("bPlay").textContent = timer ? "Pause" : "Play";
