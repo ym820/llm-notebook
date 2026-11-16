@@ -29,19 +29,21 @@ Yikai's ML and LLM learning is scattered across codebases, rough notes, and the 
 
 ## Current state
 
-- One chapter exists: Attention, in a single `index.html` (no build step).
+- Two chapters exist: Attention (`index.html`) and RMSNorm and pre-norm (`rmsnorm.html`). No build step.
+- Shared across chapters: `style.css` and `chapter.js` (chapter map, node collapse and mastery, KaTeX, code highlighting). Each page keeps its own worked-example script inline and sets `<body data-chapter="...">`. The chapter list lives in `chapter.js`.
 - Live at https://ym820.github.io/llm-notebook/. GitHub Pages publishes the root of `main`, so a push to `main` deploys.
-- The single-file prototype is deliberate while the format is still being revised. Migrating to a multi-page setup (Astro + MDX was the original idea) is an open decision for when a second chapter is added. Ask before migrating.
+- Plain static pages are deliberate while the format is still being revised. Migrating to Astro + MDX is an open decision. Ask before migrating.
 
 ## Chapter structure
 
-Each chapter has five nodes. Each node can be collapsed and marked mastered. Progress is stored in `localStorage`.
+Each chapter has five nodes, plus an Ablation node when the assignment ablates that component. Each node can be collapsed and marked mastered. Progress is stored in `localStorage`.
 
 1. **Intuition**: a few labeled lines.
 2. **Derivation**: numbered steps, each a name plus a formula with shapes. The "why" is collapsed behind a toggle.
 3. **Worked example**: a stepper over one small matrix. Clicking a cell shows its arithmetic. A variant of the topic (for example two heads) gets a second, smaller stage under the first, reusing the same inputs.
 4. **Code**: one row per step, comparing Yikai's line with a reference line.
-5. **Self-check**: three questions with hidden answers, and a button to mark the chapter mastered. A "Test me first" link at the top jumps here.
+5. **Ablation** (only where one exists): for each ablation, the code diff, a derivation of why the change matters, and Yikai's real result (numbers and plots in `img/`, downsized from the cs336 `images/`). One stage with a switch compares the variants on the same toy input. Ablations live in the chapter of the component they remove: no norm and post-norm in RMSNorm, SiLU in SwiGLU, NoPE in RoPE.
+6. **Self-check**: three questions with hidden answers, and a button to mark the chapter mastered. A "Test me first" link at the top jumps here.
 
 ## Conventions
 
@@ -76,7 +78,7 @@ Every symbol used in the example must be defined where it appears (for example w
 - Under each step, full-width lines stacked: `mine`, then the reference, tagged by source (`nanoGPT`, `PyTorch`).
 - Python highlighting with highlight.js, plus a small pass that colors call names. Colors come from the page's own tokens.
 - Keep Yikai's code. It is the from-scratch version that passed the tests. The reference shows what practice looks like.
-- Choose the reference per chapter and read the actual source first. For Attention it is `karpathy/nanoGPT` `model.py` plus `F.scaled_dot_product_attention`. `karpathy/nanochat` was rejected for Attention because its current code adds value residual, QK norm, and KV cache. nanoGPT has no RoPE or RMSNorm, so those chapters need another reference.
+- Choose the reference per chapter and read the actual source first. For Attention it is `karpathy/nanoGPT` `model.py` plus `F.scaled_dot_product_attention`. `karpathy/nanochat` was rejected for Attention because its current code adds value residual, QK norm, and KV cache. For RMSNorm it is `meta-llama/llama` `llama/model.py` for the norm and nanoGPT's `Block` for pre-norm placement. nanoGPT has no RoPE, so that chapter needs another reference.
 
 ### UI
 
@@ -92,7 +94,7 @@ Every symbol used in the example must be defined where it appears (for example w
 | 0 | Overview: one sentence through the whole model | not started |
 | 1 | BPE: encoding and training | not started |
 | 2 | Embedding | not started |
-| 3 | RMSNorm and pre-norm | not started |
+| 3 | RMSNorm and pre-norm, with no-norm and post-norm ablations | prototype done. Post-norm result is read off the plot, update when the writeup has final numbers |
 | 4 | RoPE | not started |
 | 5 | Attention: scaled dot product, causal mask, multi-head | prototype done |
 | 6 | SwiGLU FFN | not started |
@@ -113,7 +115,7 @@ Every symbol used in the example must be defined where it appears (for example w
 
 1. Read the matching code and notes in the source material.
 2. Pick and read the reference implementation.
-3. Write the five nodes following the conventions above, reusing the Attention chapter's components.
+3. Copy `rmsnorm.html` as the page skeleton, write the nodes following the conventions above, and add the file to `CHAPTERS` in `chapter.js`.
 4. Verify in the browser: no console errors, math renders, every number in the example matches the formula.
 5. Update the chapter table here.
 6. Commit, then push as a separate command.

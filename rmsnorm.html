@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RMSNorm - LLM notebook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="style.css">
+<script defer src="chapter.js"></script>
+</head>
+<body data-chapter="rmsnorm">
+<div class="layout">
+
+<nav class="map" aria-label="Chapters"></nav>
+
+<main>
+  <h1>RMSNorm and pre-norm</h1>
+  <p class="lede">$$\mathrm{RMSNorm}(a)_i=\frac{a_i}{\mathrm{RMS}(a)}\,g_i,\qquad \mathrm{RMS}(a)=\sqrt{\frac{1}{d_{model}}\sum_{i=1}^{d_{model}}a_i^2+\varepsilon}$$</p>
+  <div class="head-row">
+    <div class="progress" id="progress" aria-hidden="true"></div>
+    <span class="progress-label" id="progressLabel"></span>
+    <a class="link" href="#check">Test me first</a>
+  </div>
+
+  <!-- 1 -->
+  <section class="node" data-id="intuition">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">1</span><span class="node-title">Intuition</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad lines">
+      <p><b>Goal</b>: every vector entering a sublayer has the same size.</p>
+      <p><b>RMS</b>: the typical size of one component of \(a\).</p>
+      <p><b>Normalize</b>: divide \(a\) by its RMS. The result has RMS 1.</p>
+      <p><b>Gain</b> \(g\): one learned scale per dimension, initialized to 1.</p>
+      <p><b>Pre-norm</b>: normalize the sublayer's input. The residual stream itself is left alone.</p>
+      <p><b>Final norm</b>: the stream is never normalized, so normalize once before the LM head.</p>
+    </div></div></div>
+  </section>
+
+  <!-- 2 -->
+  <section class="node" data-id="derivation">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">2</span><span class="node-title">Derivation</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad">
+      <ol class="derive">
+        <li><div>
+          <div class="what">RMS of one token's vector</div>
+          $$\mathrm{RMS}(a)=\sqrt{\frac{1}{d_{model}}\sum_{i}a_i^2+\varepsilon}\qquad a\in\mathbb{R}^{d_{model}},\;\;\mathrm{RMS}(a)\in\mathbb{R}$$
+          <div class="why">One RMS per token. In code: <code>mean(dim=-1, keepdim=True)</code>, shape <code>(..., 1)</code>. \(\varepsilon\) guards against \(a = 0\).</div>
+        </div></li>
+        <li><div>
+          <div class="what">Divide, then apply the gain</div>
+          $$\mathrm{RMSNorm}(a)_i=\frac{a_i}{\mathrm{RMS}(a)}\,g_i\qquad g\in\mathbb{R}^{d_{model}}$$
+          <details class="aside"><summary>Why</summary>After the division: RMS 1, length \(\sqrt{d_{model}}\).<br>\(g\) starts at 1 and lets the model rescale each dimension. Parameters: \(d_{model}\).</details>
+        </div></li>
+        <li><div>
+          <div class="what">The output ignores the input's scale</div>
+          $$\mathrm{RMS}(c\,a)=c\,\mathrm{RMS}(a)\;\;\Longrightarrow\;\;\mathrm{RMSNorm}(c\,a)=\mathrm{RMSNorm}(a)\qquad c>0,\;\varepsilon\to0$$
+          <div class="why">This one property drives both ablations below.</div>
+        </div></li>
+        <li><div>
+          <div class="what">Compare with LayerNorm</div>
+          $$\mathrm{LayerNorm}(a)_i=\frac{a_i-\mu}{\sigma}\,g_i+b_i$$
+          <div class="why">RMSNorm drops the mean \(\mu\) and the bias \(b\). If \(\mu=0\) then \(\sigma=\mathrm{RMS}(a)\).</div>
+        </div></li>
+        <li class="sub">Pre-norm block</li>
+        <li><div>
+          <div class="what">Normalize the input of each sublayer</div>
+          $$y=x+\mathrm{Attn}(\mathrm{Norm}_1(x)),\qquad z=y+\mathrm{FFN}(\mathrm{Norm}_2(y))\qquad x,y,z\in\mathbb{R}^{T\times d_{model}}$$
+          <div class="why">Each norm has its own \(g\). Two per block.</div>
+        </div></li>
+        <li><div>
+          <div class="what">Unroll the residual stream</div>
+          $$x_L=x_0+\sum_{l=0}^{L-1}F_l\big(\mathrm{Norm}(x_l)\big)$$
+          <div class="why">\(F_l\): one sublayer, attention or FFN. The stream is a running sum. Nothing normalizes it.</div>
+        </div></li>
+        <li><div>
+          <div class="what">Normalize once before the LM head</div>
+          $$\mathrm{logits}=\mathrm{LMHead}\big(\mathrm{Norm}_{f}(x_L)\big)$$
+          <details class="aside"><summary>Why</summary>The head is the only consumer of the stream that is not a sublayer, so it needs its own norm.<br>Gains in your model: \(2\,d_{model}\) per block plus \(d_{model}\) for \(\mathrm{Norm}_f\).</details>
+        </div></li>
+      </ol>
+    </div></div></div>
+  </section>
+
+  <!-- 3 -->
+  <section class="node" data-id="example">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">3</span><span class="node-title">Worked example</span><span class="node-hint">the cat sat down</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad">
+      <div class="stage" id="stage">
+        <div class="steps" role="tablist" id="steps"></div>
+        <div class="step-formula" id="formula"></div>
+        <div class="board">
+          <div class="grid c5" id="grid"></div>
+          <div class="inspect" id="inspect" aria-live="polite"></div>
+        </div>
+        <div class="stage-foot">
+          <span class="kbd">Click a cell. ← → change step.</span>
+          <div class="nav"><button id="prev">Back</button><button id="next">Next step</button></div>
+        </div>
+      </div>
+      <p class="toy"><b>Toy:</b> \(d_{model}=4\). Rows are the Attention chapter's \(x\), scaled by 1, 3, 0.5, 10 so their sizes differ. \(g=[1, 1, 2, 0.5]\), hand-picked.<br><b>Yours:</b> \(d_{model}=512\), \(\varepsilon=10^{-5}\), \(g\) learned from all ones.</p>
+    </div></div></div>
+  </section>
+
+  <!-- 4 -->
+  <section class="node" data-id="code">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">4</span><span class="node-title">Code</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad">
+      <div class="pairs">
+        <div class="pair-row"><div class="lab"><b>Upcast</b><span>float32</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>x = x.to(torch.float32)</code></div><div class="cl"><span class="tag">Llama</span><code>output = self._norm(x.float()).type_as(x)</code></div></div></div>
+        <div class="pair-row"><div class="lab"><b>Square, RMS</b><span>\(\mathrm{RMS}(a)\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>rms = torch.sqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)</code></div><div class="cl"><span class="tag">Llama</span><code>return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)</code></div></div></div>
+        <div class="pair-row"><div class="lab"><b>Divide, Gain</b><span>\(a_i\,g_i/\mathrm{RMS}(a)\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>result = x / rms * self.weight</code></div><div class="cl"><span class="tag">Llama</span><code>return output * self.weight</code></div></div></div>
+        <div class="pair-row"><div class="lab"><b>Pre-norm</b><span>\(x+F(\mathrm{Norm}(x))\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>x = x + self.attn(self.ln1(x), token_positions)</code></div><div class="cl"><span class="tag"></span><code>x = x + self.ffn(self.ln2(x))</code></div><div class="cl"><span class="tag">nanoGPT</span><code>x = x + self.attn(self.ln_1(x))</code></div><div class="cl"><span class="tag"></span><code>x = x + self.mlp(self.ln_2(x))</code></div></div></div>
+        <div class="pair-row"><div class="lab"><b>Final norm</b><span>\(\mathrm{Norm}_f(x_L)\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>x = self.ln_final(x)</code></div><div class="cl"><span class="tag">nanoGPT</span><code>x = self.transformer.ln_f(x)</code></div></div></div>
+      </div>
+      <p class="toy">mine: <code class="i">cs336_basics/model.py:76</code>, <code class="i">:277</code>, <code class="i">:363</code>. Llama: <code class="i">meta-llama/llama llama/model.py</code>. nanoGPT: <code class="i">karpathy/nanoGPT model.py</code> (MIT).<br>Llama multiplies by <code class="i">rsqrt</code> instead of dividing by <code class="i">sqrt</code>, and uses \(\varepsilon=10^{-6}\). nanoGPT's norm is LayerNorm, in the same pre-norm position.</p>
+    </div></div></div>
+  </section>
+
+  <!-- 5 -->
+  <section class="node" data-id="ablation">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">5</span><span class="node-title">Ablation</span><span class="node-hint">no norm, post-norm</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad">
+      <div class="stage">
+        <div class="steps" role="tablist" id="modes"></div>
+        <div class="step-formula" id="modeFormula"></div>
+        <div class="board">
+          <div class="grid c5" id="stream"></div>
+          <div class="inspect" id="inspectStream" aria-live="polite"></div>
+        </div>
+      </div>
+      <p class="toy"><b>Toy:</b> one token (cat), 4 sublayers. Every sublayer is the same fixed map \(F(x)=2Px\), where \(P\) shifts each dimension one place to the right, so \(\mathrm{RMS}(F(x))=2\,\mathrm{RMS}(x)\). \(g=1\).<br><b>Yours:</b> 4 blocks, so 8 sublayers, each an attention or a SwiGLU with learned weights.</p>
+
+      <div class="sub">No norm</div>
+      <div class="pairs">
+        <div class="pair-row"><div class="lab"><b>Diff</b><span>\(x+F(x)\)</span></div><div class="lines-code"><div class="cl"><span class="tag">base</span><code>x = x + self.attn(self.ln1(x), token_positions)</code></div><div class="cl"><span class="tag"></span><code>x = x + self.ffn(self.ln2(x))</code></div><div class="cl"><span class="tag">ablated</span><code>x = x + self.attn(x, token_positions)</code></div><div class="cl"><span class="tag"></span><code>x = x + self.ffn(x)</code></div></div></div>
+      </div>
+      <p class="toy">Your <code class="i">no_norm</code> removes the two block norms. <code class="i">ln_final</code> still runs.</p>
+      <ol class="derive">
+        <li><div>
+          <div class="what">With norm, an update cannot depend on the stream's size</div>
+          $$F\big(\mathrm{Norm}(c\,x)\big)=F\big(\mathrm{Norm}(x)\big)\;\;\Longrightarrow\;\;\|x_L\|\le\|x_0\|+\sum_{l}\big\|F_l(\mathrm{Norm}(x_l))\big\|$$
+          <div class="why">Each sublayer adds a bounded amount. Growth is at most linear in depth.</div>
+        </div></li>
+        <li><div>
+          <div class="what">Without norm, an update scales with the stream</div>
+          $$\|F(x)\|\le k\,\|x\|\;\;\Longrightarrow\;\;\|x_{l+1}\|\le(1+k)\,\|x_l\|\;\;\Longrightarrow\;\;\|x_L\|\le(1+k)^L\,\|x_0\|$$
+          <details class="aside"><summary>Why</summary>\(k\): how much the sublayer's weights amplify their input. The bound is reached when \(F(x)\) points along \(x\).<br>Growth can be exponential in depth, and \(k\) changes with every optimizer step. A larger LR moves the weights, and so \(k\), further per step.</details>
+        </div></li>
+        <li><div>
+          <div class="what">Attention scores grow with the square of the stream</div>
+          $$Q=XW_Q,\;K=XW_K\;\;\Longrightarrow\;\;S(c\,X)=c^2\,S(X)$$
+          <div class="why">Large scores push softmax to one-hot, the same failure \(\sqrt{d_k}\) guards against.</div>
+        </div></li>
+      </ol>
+      <div class="sub">Your result</div>
+      <table class="blend">
+        <tr><th>No norm, LR</th><th>Outcome</th></tr>
+        <tr><td>3e-3</td><td>NaN</td></tr>
+        <tr><td>1e-3</td><td>NaN</td></tr>
+        <tr><td>3e-4</td><td>stalls near 7.46</td></tr>
+        <tr><td>1e-4</td><td>trains</td></tr>
+      </table>
+      <img class="plot" src="img/no-norm-lr-comparison.png" alt="Validation loss for the model without norm at four learning rates. Only 1e-4 decreases steadily." loading="lazy">
+      <table class="blend">
+        <tr><th>Model</th><th>Val loss</th></tr>
+        <tr><td>Best baseline, LR 3e-3</td><td>1.3387</td></tr>
+        <tr><td>Baseline, LR 1e-4</td><td>1.8004</td></tr>
+        <tr><td>No norm, LR 1e-4</td><td>2.0827</td></tr>
+      </table>
+      <img class="plot" src="img/no-norm_ablation.png" alt="Validation loss: no norm at 1e-4 stays above the baseline at 1e-4, which stays above the baseline at 3e-3." loading="lazy">
+      <p class="toy">Of the 0.74 gap to the best baseline: about 0.46 comes from the lower LR, about 0.28 from removing the norm.</p>
+
+      <div class="sub">Post-norm</div>
+      <div class="pairs">
+        <div class="pair-row"><div class="lab"><b>Diff</b><span>\(\mathrm{Norm}(x+F(x))\)</span></div><div class="lines-code"><div class="cl"><span class="tag">base</span><code>x = x + self.attn(self.ln1(x), token_positions)</code></div><div class="cl"><span class="tag"></span><code>x = x + self.ffn(self.ln2(x))</code></div><div class="cl"><span class="tag">ablated</span><code>x = self.ln1(x + self.attn(x, token_positions))</code></div><div class="cl"><span class="tag"></span><code>x = self.ln2(x + self.ffn(x))</code></div></div></div>
+      </div>
+      <ol class="derive">
+        <li><div>
+          <div class="what">Forward: the stream is renormalized after every sublayer</div>
+          $$x_{l+1}=\mathrm{Norm}\big(x_l+F(x_l)\big)\;\;\Longrightarrow\;\;\mathrm{RMS}(x_l)=1\;\text{ for all } l \quad (g=1)$$
+          <div class="why">Sizes are as controlled as in pre-norm. The difference is in the backward pass.</div>
+        </div></li>
+        <li><div>
+          <div class="what">Backward, pre-norm: one path skips every norm</div>
+          $$\frac{\partial x_{l+1}}{\partial x_l}=I+\frac{\partial F(\mathrm{Norm}(x_l))}{\partial x_l}$$
+          <div class="why">Multiply these over all layers: one term is \(I\). The gradient reaches every layer through it unchanged.</div>
+        </div></li>
+        <li><div>
+          <div class="what">Backward, post-norm: every path crosses every norm</div>
+          $$\frac{\partial x_{l+1}}{\partial x_l}=J_{\mathrm{Norm}}(u_l)\left(I+\frac{\partial F(x_l)}{\partial x_l}\right),\qquad u_l=x_l+F(x_l)$$
+          <div class="why">No term is \(I\). With \(L\) sublayers above it, a gradient is multiplied by \(L\) norm Jacobians.</div>
+        </div></li>
+        <li><div>
+          <div class="what">The norm Jacobian</div>
+          $$J_{\mathrm{Norm}}(u)=\frac{1}{\mathrm{RMS}(u)}\,\mathrm{diag}(g)\left(I-\frac{uu^\top}{d_{model}\,\mathrm{RMS}(u)^2}\right)$$
+          <details class="aside"><summary>Why</summary>From \(y_i=g_i u_i/r\) with \(r=\mathrm{RMS}(u)\) and \(\partial r/\partial u_j=u_j/(d_{model}\,r)\).<br>Two effects: it rescales the gradient by \(1/\mathrm{RMS}(u)\), and it removes the component along \(u\), since \(J_{\mathrm{Norm}}(u)\,u=0\).<br>Reference: Xiong et al. 2020, "On Layer Normalization in the Transformer Architecture".</details>
+        </div></li>
+      </ol>
+      <div class="sub">Your result</div>
+      <table class="blend">
+        <tr><th>LR</th><th>Pre-norm (baseline)</th><th>Post-norm</th></tr>
+        <tr><td>3e-3</td><td>1.3387</td><td>slightly above baseline at every eval</td></tr>
+        <tr><td>1e-2</td><td>1.36</td><td>near 6 until about step 9.5k</td></tr>
+      </table>
+      <img class="plot" src="img/post-norm_ablation.png" alt="Validation loss: post-norm at 3e-3 tracks the baseline closely. Post-norm at 1e-2 stays flat near 6 for most of training." loading="lazy">
+      <p class="toy">Post-norm values are read off the plot. The writeup section for this ablation has no final numbers yet.</p>
+    </div></div></div>
+  </section>
+
+  <!-- 6 -->
+  <section class="node" data-id="check" id="check">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">6</span><span class="node-title">Self-check</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad quiz">
+      <details><summary>Write RMSNorm with the shape of every term. What is \(\mathrm{RMSNorm}(c\,a)\)?</summary>
+        <p class="ans">\(a,g\in\mathbb{R}^{d_{model}}\), \(\mathrm{RMS}(a)=\sqrt{\frac{1}{d_{model}}\sum_i a_i^2+\varepsilon}\in\mathbb{R}\), output \(a_i g_i/\mathrm{RMS}(a)\in\mathbb{R}^{d_{model}}\). \(\mathrm{RMSNorm}(c\,a)=\mathrm{RMSNorm}(a)\) for \(c>0\), ignoring \(\varepsilon\).</p></details>
+      <details><summary>Why does a pre-norm model need a final norm before the LM head?</summary>
+        <p class="ans">Pre-norm only normalizes sublayer inputs. The stream \(x_L=x_0+\sum_l F_l(\mathrm{Norm}(x_l))\) is an unnormalized sum, and the head reads it directly.</p></details>
+      <details><summary>Without norm, why can the stream grow exponentially with depth?</summary>
+        <p class="ans">A sublayer's output scales with its input: \(\|F(x)\|\le k\|x\|\), so \(\|x_L\|\le(1+k)^L\|x_0\|\). With norm, \(F\) sees a unit-RMS input whatever the stream's size, so each layer adds a bounded amount.</p></details>
+      <details><summary>In post-norm, what does every gradient path cross that one pre-norm path avoids?</summary>
+        <p class="ans">The norm Jacobian of every sublayer above it. Pre-norm's layer Jacobian is \(I+\dots\), so one path is the identity. Post-norm's is \(J_{\mathrm{Norm}}(I+\dots)\), with no identity term.</p></details>
+      <button class="primary" id="masterAll">Mark chapter mastered</button>
+    </div></div></div>
+  </section>
+</main>
+</div>
+
+<script>
+// ---------- toy numbers (hand-picked, computed for real) ----------
+const TOK = ["the", "cat", "sat", "down"];
+const X0 = [[0.1, 0.0, 1.0, 0.2], [1.0, 0.1, 0.0, 0.3], [0.1, 1.0, 0.0, 0.5], [0.0, 0.3, 0.2, 1.0]]; // Attention chapter's X
+const C = [1, 3, 0.5, 10], G = [1, 1, 2, 0.5], EPS = 1e-5, D = 4;
+const rms = a => Math.sqrt(a.reduce((s, v) => s + v * v, 0) / a.length + EPS);
+const X = X0.map((r, i) => r.map(v => v * C[i]));
+const SQ = X.map(r => r.map(v => v * v));
+const RMS = X.map(rms);
+const N = X.map((r, i) => r.map(v => v / RMS[i]));
+const Y = N.map(r => r.map((v, j) => v * G[j]));
+// self-check: fails loudly if the toy math breaks
+N.forEach(r => console.assert(Math.abs(rms(r) - 1) < 1e-4, "normalized rows must have RMS 1"));
+console.assert(N[1].every((v, j) => Math.abs(v - X0[1][j] / rms(X0[1])) < 1e-4), "scaling a row must not change its normalized value");
+
+const f = v => v.toFixed(2);
+const $ = id => document.getElementById(id);
+const max = M => Math.max(...M.flat());
+const STEPS = [
+  { name: "Input", tex: "x", M: X, note: "Rows have very different sizes." },
+  { name: "Square", tex: "x_i^2", M: SQ, note: "Every component squared." },
+  { name: "RMS", tex: "\\mathrm{RMS}(x)=\\sqrt{\\tfrac{1}{4}\\textstyle\\sum_i x_i^2+\\varepsilon}", M: SQ, note: "One number per row." },
+  { name: "Divide", tex: "x_i/\\mathrm{RMS}(x)", M: N, note: "Every row now has RMS 1." },
+  { name: "Gain", tex: "g_i\\,x_i/\\mathrm{RMS}(x)", M: Y, note: "Each column times its gain." },
+];
+
+// ---------- stage ----------
+let step = 0, sel = [1, 0];
+const grid = $("grid"), stepsEl = $("steps");
+STEPS.forEach((s, i) => {
+  const b = document.createElement("button");
+  b.textContent = s.name; b.setAttribute("role", "tab");
+  b.onclick = () => go(i);
+  stepsEl.append(b);
+});
+grid.innerHTML = `<div class="corner">token ↓<br>dim →</div>` + [1, 2, 3, 4].map(d => `<div class="col">dim ${d}</div>`).join("") + `<div class="col">RMS</div>` +
+  TOK.map((t, i) => `<button class="row" data-i="${i}">${t}</button>` +
+    [0, 1, 2, 3].map(j => `<button class="cell" data-i="${i}" data-j="${j}"></button>`).join("") + `<div class="cell plain" data-r="${i}"></div>`).join("");
+grid.onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  sel = [+b.dataset.i, b.dataset.j === undefined ? sel[1] : +b.dataset.j];
+  render();
+};
+
+function inspect() {
+  const [i, j] = sel, t = TOK[i], at = `[${t}, dim ${j + 1}]`;
+  if (step === 0) return `<h4>x<sub>${t}</sub></h4><div class="calc">${C[i]} × [${X0[i].map(f).join(", ")}] = <b>[${X[i].map(f).join(", ")}]</b></div>`;
+  if (step === 1) return `<h4>x²${at}</h4><div class="calc">${f(X[i][j])}² = <b>${f(SQ[i][j])}</b></div>`;
+  if (step === 2) {
+    const sum = SQ[i].reduce((a, b) => a + b);
+    return `<h4>RMS(x<sub>${t}</sub>)</h4><div class="calc">mean = (${SQ[i].map(f).join(" + ")}) / 4 = ${f(sum / D)}<br>√(${f(sum / D)} + ε) = <b>${f(RMS[i])}</b></div><p class="defs">ε = 10<sup>−5</sup>, too small to show at two decimals.</p>`;
+  }
+  if (step === 3) return `<h4>(x / RMS)${at}</h4><div class="calc">${f(X[i][j])} / ${f(RMS[i])} = <b>${f(N[i][j])}</b><br>RMS of the new row [${N[i].map(f).join(", ")}] = <b>${f(rms(N[i]))}</b></div>`;
+  return `<h4>RMSNorm(x)${at}</h4><div class="calc">${f(N[i][j])} × g[dim ${j + 1}] = ${f(N[i][j])} × ${f(G[j])} = <b>${f(Y[i][j])}</b></div><p class="defs">g = [${G.map(f).join(", ")}], one gain per dimension, shared by all tokens.</p>`;
+}
+
+function render() {
+  const M = STEPS[step].M, top = max(M);
+  [...stepsEl.children].forEach((b, i) => b.setAttribute("aria-selected", i === step));
+  $("formula").innerHTML = `<div>${katex.renderToString(STEPS[step].tex, { displayMode: false })}</div><p>${STEPS[step].note}</p>`;
+  grid.querySelectorAll("button.cell").forEach(c => {
+    const i = +c.dataset.i, j = +c.dataset.j, t = M[i][j] / top;
+    c.textContent = f(M[i][j]);
+    c.style.setProperty("--t", t.toFixed(3));
+    c.classList.toggle("hot", t > 0.55);
+    c.classList.toggle("sel", step !== 0 && step !== 2 && i === sel[0] && j === sel[1]);
+    c.classList.toggle("inline", i === sel[0]);
+    c.setAttribute("aria-label", `${TOK[i]}, dim ${j + 1}: ${c.textContent}`);
+  });
+  grid.querySelectorAll("[data-r]").forEach(c => {
+    const i = +c.dataset.r;
+    c.textContent = step < 2 ? "" : f(step === 2 ? RMS[i] : rms(M[i]));
+    c.classList.toggle("sel", step === 2 && i === sel[0]);
+  });
+  grid.querySelectorAll(".row").forEach(r => r.setAttribute("aria-pressed", +r.dataset.i === sel[0]));
+  $("inspect").innerHTML = inspect();
+  $("prev").disabled = step === 0; $("next").disabled = step === STEPS.length - 1;
+}
+function go(i) { step = Math.max(0, Math.min(STEPS.length - 1, i)); render(); }
+$("prev").onclick = () => go(step - 1);
+$("next").onclick = () => go(step + 1);
+$("stage").addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { go(step + 1); e.preventDefault(); }
+  if (e.key === "ArrowLeft") { go(step - 1); e.preventDefault(); }
+});
+
+// ---------- ablation: stream size across layers, same toy sublayer F(x) = 2Px in three placements ----------
+const LAYERS = 4, K = 2;
+const F = x => x.map((_, j) => K * x[(j + D - 1) % D]);          // shift right by one, times K
+const norm = x => { const r = rms(x); return x.map(v => v / r); };
+const add = (a, b) => a.map((v, j) => v + b[j]);
+const MODES = [
+  { name: "Pre-norm", tex: "x_{l+1}=x_l+F(\\mathrm{Norm}(x_l))", note: "Each layer adds a vector of RMS 2.", next: x => add(x, F(norm(x))) },
+  { name: "Post-norm", tex: "x_{l+1}=\\mathrm{Norm}(x_l+F(x_l))", note: "RMS is reset to 1 after every layer.", next: x => norm(add(x, F(x))) },
+  { name: "No norm", tex: "x_{l+1}=x_l+F(x_l)", note: "Each layer adds a vector twice the stream's size.", next: x => add(x, F(x)) },
+];
+MODES.forEach(m => { m.xs = [X0[1]]; for (let l = 0; l < LAYERS; l++) m.xs.push(m.next(m.xs[l])); });
+const TOP = max(MODES.flatMap(m => m.xs));
+console.assert(MODES[1].xs.slice(1).every(x => Math.abs(rms(x) - 1) < 1e-4), "post-norm stream must have RMS 1");
+console.assert(rms(MODES[2].xs[LAYERS]) > 3 * rms(MODES[0].xs[LAYERS]), "no-norm stream should outgrow pre-norm");
+
+let mode = 0, layer = 1;
+MODES.forEach((m, i) => {
+  const b = document.createElement("button");
+  b.textContent = m.name; b.setAttribute("role", "tab");
+  b.onclick = () => { mode = i; renderStream(); };
+  $("modes").append(b);
+});
+$("stream").onclick = e => { const b = e.target.closest(".row"); if (b) { layer = +b.dataset.l; renderStream(); } };
+function renderStream() {
+  const m = MODES[mode], v = a => `[${a.map(f).join(", ")}]`;
+  [...$("modes").children].forEach((b, i) => b.setAttribute("aria-selected", i === mode));
+  $("modeFormula").innerHTML = `<div>${katex.renderToString(m.tex, { displayMode: false })}</div><p>${m.note} Pick a layer.</p>`;
+  $("stream").innerHTML = `<div class="corner">layer ↓<br>dim →</div>` + [1, 2, 3, 4].map(d => `<div class="col">dim ${d}</div>`).join("") + `<div class="col">RMS</div>` +
+    m.xs.map((x, l) => `<button class="row" data-l="${l}" aria-pressed="${l === layer}"${l ? "" : " disabled"}>x<sub>${l}</sub></button>` +
+      x.map(val => `<div class="cell${val / TOP > 0.55 ? " hot" : ""}${l === layer ? " inline" : ""}" style="--t:${(val / TOP).toFixed(3)}">${f(val)}</div>`).join("") +
+      `<div class="cell plain">${f(rms(x))}</div>`).join("") +
+    `<div class="row">final</div>` + norm(m.xs[LAYERS]).map(val => `<div class="cell" style="--t:${(val / TOP).toFixed(3)}">${f(val)}</div>`).join("") + `<div class="cell plain">${f(1)}</div>`;
+  const x = m.xs[layer - 1], n = norm(x);
+  const lines = mode === 0 ? [`Norm(x<sub>${layer - 1}</sub>) = ${v(x)} / ${f(rms(x))} = ${v(n)}`, `F(Norm(x<sub>${layer - 1}</sub>)) = 2 × shift = ${v(F(n))}`, `x<sub>${layer}</sub> = ${v(x)} + ${v(F(n))} = <b>${v(m.xs[layer])}</b>`]
+    : mode === 1 ? [`F(x<sub>${layer - 1}</sub>) = 2 × shift = ${v(F(x))}`, `u = x<sub>${layer - 1}</sub> + F(x<sub>${layer - 1}</sub>) = ${v(add(x, F(x)))}`, `x<sub>${layer}</sub> = u / RMS(u) = u / ${f(rms(add(x, F(x))))} = <b>${v(m.xs[layer])}</b>`]
+    : [`F(x<sub>${layer - 1}</sub>) = 2 × shift = ${v(F(x))}`, `x<sub>${layer}</sub> = ${v(x)} + ${v(F(x))} = <b>${v(m.xs[layer])}</b>`];
+  $("inspectStream").innerHTML = `<h4>x<sub>${layer - 1}</sub> → x<sub>${layer}</sub></h4><div class="calc">${lines.join("<br>")}</div>
+    <p class="defs">RMS: ${f(rms(x))} → <b>${f(rms(m.xs[layer]))}</b>. After ${LAYERS} layers: ${f(rms(m.xs[LAYERS]))}.<br>final = Norm(x<sub>${LAYERS}</sub>), what the LM head sees.</p>`;
+}
+
+window.addEventListener("DOMContentLoaded", () => { render(); renderStream(); });
+</script>
+</body>
+</html>
