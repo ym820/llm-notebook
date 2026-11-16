@@ -31,7 +31,6 @@ Yikai's ML and LLM learning is scattered across codebases, rough notes, and the 
 
 - One chapter exists: Attention, in a single `index.html` (no build step).
 - Live at https://ym820.github.io/llm-notebook/. GitHub Pages publishes the root of `main`, so a push to `main` deploys.
-- Multi-head attention is not in the Attention chapter yet.
 - The single-file prototype is deliberate while the format is still being revised. Migrating to a multi-page setup (Astro + MDX was the original idea) is an open decision for when a second chapter is added. Ask before migrating.
 
 ## Chapter structure
@@ -40,7 +39,7 @@ Each chapter has five nodes. Each node can be collapsed and marked mastered. Pro
 
 1. **Intuition**: a few labeled lines.
 2. **Derivation**: numbered steps, each a name plus a formula with shapes. The "why" is collapsed behind a toggle.
-3. **Worked example**: a stepper over one small matrix. Clicking a cell shows its arithmetic.
+3. **Worked example**: a stepper over one small matrix. Clicking a cell shows its arithmetic. A variant of the topic (for example two heads) gets a second, smaller stage under the first, reusing the same inputs.
 4. **Code**: one row per step, comparing Yikai's line with a reference line.
 5. **Self-check**: three questions with hidden answers, and a button to mark the chapter mastered. A "Test me first" link at the top jumps here.
 
@@ -95,7 +94,7 @@ Every symbol used in the example must be defined where it appears (for example w
 | 2 | Embedding | not started |
 | 3 | RMSNorm and pre-norm | not started |
 | 4 | RoPE | not started |
-| 5 | Attention: scaled dot product, causal mask, multi-head | prototype done, multi-head missing |
+| 5 | Attention: scaled dot product, causal mask, multi-head | prototype done |
 | 6 | SwiGLU FFN | not started |
 | 7 | Transformer block and residual stream | not started |
 | 8 | LM head, cross entropy, perplexity | not started |

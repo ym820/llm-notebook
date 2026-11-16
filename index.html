@@ -90,6 +90,8 @@ h1 { font-family: var(--serif); font-weight: 600; font-size: 44px; line-height: 
 .derive { list-style: none; margin: 0; padding: 0; counter-reset: d; }
 .derive > li { counter-increment: d; display: grid; grid-template-columns: 28px minmax(0, 1fr); padding: 14px 0; border-top: 1px dashed var(--line); }
 .derive > li:first-child { border-top: 0; padding-top: 0; }
+.derive > li.sub, .sub { display: block; counter-increment: none; font-size: 13px; font-weight: 600; color: var(--muted); padding: 22px 0 6px; }
+.derive > li.sub::before { content: none; }
 .derive > li::before { content: counter(d); font-family: var(--mono); font-size: 13px; color: var(--muted); padding-top: 3px; }
 .derive .what { font-weight: 600; margin-bottom: 2px; }
 .derive .why { font-size: 14px; color: var(--muted); }
@@ -110,6 +112,13 @@ details.aside[open] summary { margin-bottom: 8px; }
 .step-formula p { margin: 2px 0 0; font-size: 14px; color: var(--muted); }
 .board { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 28px; align-items: start; margin-top: 12px; }
 .grid { display: grid; grid-template-columns: 56px repeat(4, 64px); gap: 4px; font-family: var(--mono); font-size: 14px; }
+.heads { display: flex; gap: 32px; flex-wrap: wrap; margin: 12px 0 18px; }
+.heads h5 { margin: 0 0 8px; font-size: 13px; font-weight: 500; }
+.heads h5 span { color: var(--muted); font-weight: 400; }
+.grid.sm { grid-template-columns: 44px repeat(4, 50px); font-size: 12.5px; }
+.grid.sm .cell, .grid.sm .row { height: 38px; }
+.grid.sm .cell { display: grid; place-items: center; }
+.blend .split { border-left: 1px solid var(--line); }
 .grid .corner { font-family: var(--sans); font-size: 11px; color: var(--muted); line-height: 1.2; align-self: end; padding-bottom: 4px; }
 .grid .col { text-align: center; color: var(--muted); padding-bottom: 4px; align-self: end; }
 .grid .row { text-align: right; padding-right: 8px; height: 48px; border-radius: 6px; color: var(--muted); transition: color 160ms ease; }
@@ -239,6 +248,7 @@ pre .ln { display: block; padding: 0 6px; margin: 0 -6px; border-radius: 4px; tr
       <p><b>Score</b> \(S_{ij} = q_i\cdot k_j\): how well \(k_j\) matches \(q_i\).</p>
       <p><b>Weight</b> \(A_{ij}\): softmax of the scores over \(j\).</p>
       <p><b>Output</b> \(o_i = \sum_j A_{ij}\,v_j\): weighted sum of values.</p>
+      <p><b>Heads</b>: run \(H\) attentions in parallel, each on \(d_{model}/H\) dimensions, then concatenate.</p>
     </div></div></div>
   </section>
 
@@ -283,6 +293,22 @@ pre .ln { display: block; padding: 0 6px; margin: 0 -6px; border-radius: 4px; tr
           <div class="what">Blend the values</div>
           $$O = AV \in \mathbb{R}^{T\times d_v},\qquad o_i = \sum_j A_{ij}\,v_j$$
         </div></li>
+        <li class="sub">Multi-head</li>
+        <li><div>
+          <div class="what">Split into \(H\) heads</div>
+          $$d_k = d_v = \frac{d_{model}}{H},\qquad XW_Q \in \mathbb{R}^{T\times d_{model}} \;\to\; Q^{(h)} \in \mathbb{R}^{T\times d_k},\quad h = 1..H$$
+          <div class="why">Head \(h\) takes columns \((h-1)d_k\) to \(hd_k\). Same split for \(K\) and \(V\). In code \(H\) is a batch dimension.</div>
+        </div></li>
+        <li><div>
+          <div class="what">Attend in each head</div>
+          $$O^{(h)} = \mathrm{softmax}\!\left(\frac{Q^{(h)}K^{(h)\top}}{\sqrt{d_k}} + M\right)V^{(h)} \in \mathbb{R}^{T\times d_k}$$
+          <details class="aside"><summary>Why</summary>One softmax gives each token one distribution. \(H\) heads give it \(H\) distributions, so it can attend to different tokens for different reasons.<br>Same mask \(M\) for every head.</details>
+        </div></li>
+        <li><div>
+          <div class="what">Concatenate and project</div>
+          $$O = \big[\,O^{(1)} \;\cdots\; O^{(H)}\,\big]\,W_O \in \mathbb{R}^{T\times d_{model}},\qquad W_O \in \mathbb{R}^{d_{model}\times d_{model}}$$
+          <details class="aside"><summary>Why</summary>Concatenation keeps heads in separate columns. \(W_O\) mixes them.<br>Parameters: \(W_Q, W_K, W_V, W_O\), so \(4\,d_{{model}}^2\) with no bias. Independent of \(H\).</details>
+        </div></li>
       </ol>
     </div></div></div>
   </section>
@@ -307,6 +333,13 @@ pre .ln { display: block; padding: 0 6px; margin: 0 -6px; border-radius: 4px; tr
         </div>
       </div>
       <p class="toy"><b>Toy:</b> \(T=4\), \(d_k=4\), 1 head, \(W_V=I\), hand-picked weights.<br><b>Yours:</b> \(T=256\), \(d_{model}=512\), 16 heads, so \(d_k=32\) and the divisor is \(\sqrt{32}\approx5.66\).</p>
+      <div class="sub">Two heads</div>
+      <div class="stage">
+        <div class="step-formula"><div>\(O = [\,O^{(1)}\;O^{(2)}\,]\,W_O\)</div><p>Same five steps, once per head, each on half the dimensions. Pick a row.</p></div>
+        <div class="heads" id="heads"></div>
+        <div class="inspect" id="inspect2" aria-live="polite"></div>
+      </div>
+      <p class="toy"><b>Toy:</b> \(d_{model}=4\), \(H=2\), \(d_k=2\), divisor \(\sqrt2\), \(W_V=W_O=I\). Same \(X\), \(W_Q\), \(W_K\) as above.<br><b>Yours:</b> \(d_{model}=512\), \(H=16\), \(d_k=32\).</p>
     </div></div></div>
   </section>
 
@@ -317,8 +350,8 @@ pre .ln { display: block; padding: 0 6px; margin: 0 -6px; border-radius: 4px; tr
       <button class="master">Mark mastered</button>
     </div>
     <div class="node-body"><div class="node-inner"><div class="node-pad">
-<div class="pairs"><div class="pair-row"><div class="lab"><b>Scores, Scale</b><span>\(QK^\top/\sqrt{d_k}\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>score = einsum(Q, K, "... q d_k, ... k d_k -> ... q k") / math.sqrt(d_k)</code></div><div class="cl"><span class="tag">nanoGPT</span><code>att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))</code></div></div></div><div class="pair-row"><div class="lab"><b>Mask</b><span>\(+\,M\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>score.masked_fill_(~mask, float("-inf"))</code></div><div class="cl"><span class="tag">nanoGPT</span><code>att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))</code></div></div></div><div class="pair-row"><div class="lab"><b>Softmax, Blend</b><span>\(\mathrm{softmax}(\cdot)\,V\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>attention = einsum(softmax(score, dim=-1), V, "... q k, ... k d_v -> ... q d_v")</code></div><div class="cl"><span class="tag">nanoGPT</span><code>att = F.softmax(att, dim=-1)</code></div><div class="cl"><span class="tag"></span><code>y = att @ v</code></div></div></div><div class="pair-row"><div class="lab"><b>All five steps</b></div><div class="lines-code"><div class="cl"><span class="tag">PyTorch</span><code>y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></div></div></div></div>
-      <p class="toy">mine: <code class="i">cs336_basics/model.py:187</code>. nanoGPT: <code class="i">karpathy/nanoGPT model.py</code> (MIT). PyTorch: the built-in, one fused call.<br>Your mask is <code class="i">torch.tril(torch.ones((T, T), dtype=torch.bool))</code>. True = may attend, hence <code class="i">~mask</code>.</p>
+<div class="pairs"><div class="pair-row"><div class="lab"><b>Split heads</b><span>\(Q \to Q^{(h)}\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>Q = rearrange(self.q_proj(x), "... T (H d_k) -> ... H T d_k", H=self.num_heads)</code></div><div class="cl"><span class="tag">nanoGPT</span><code>q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)</code></div></div></div><div class="pair-row"><div class="lab"><b>Scores, Scale</b><span>\(QK^\top/\sqrt{d_k}\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>score = einsum(Q, K, "... q d_k, ... k d_k -> ... q k") / math.sqrt(d_k)</code></div><div class="cl"><span class="tag">nanoGPT</span><code>att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))</code></div></div></div><div class="pair-row"><div class="lab"><b>Mask</b><span>\(+\,M\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>score.masked_fill_(~mask, float("-inf"))</code></div><div class="cl"><span class="tag">nanoGPT</span><code>att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))</code></div></div></div><div class="pair-row"><div class="lab"><b>Softmax, Blend</b><span>\(\mathrm{softmax}(\cdot)\,V\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>attention = einsum(softmax(score, dim=-1), V, "... q k, ... k d_v -> ... q d_v")</code></div><div class="cl"><span class="tag">nanoGPT</span><code>att = F.softmax(att, dim=-1)</code></div><div class="cl"><span class="tag"></span><code>y = att @ v</code></div></div></div><div class="pair-row"><div class="lab"><b>Scores to Blend</b></div><div class="lines-code"><div class="cl"><span class="tag">PyTorch</span><code>y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></div></div></div><div class="pair-row"><div class="lab"><b>Concat heads</b><span>\([\,O^{(1)} \cdots O^{(H)}\,]\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>attention = rearrange(attention, "... H T d_v -> ... T (H d_v)")</code></div><div class="cl"><span class="tag">nanoGPT</span><code>y = y.transpose(1, 2).contiguous().view(B, T, C)</code></div></div></div><div class="pair-row"><div class="lab"><b>Project</b><span>\(\cdot\,W_O\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>return self.output_proj(attention)</code></div><div class="cl"><span class="tag">nanoGPT</span><code>y = self.resid_dropout(self.c_proj(y))</code></div></div></div></div>
+      <p class="toy">mine: <code class="i">cs336_basics/model.py:187</code> and <code class="i">:228</code>. nanoGPT: <code class="i">karpathy/nanoGPT model.py</code> (MIT). PyTorch: the built-in, one fused call.<br>Your mask is <code class="i">torch.tril(torch.ones((T, T), dtype=torch.bool))</code>. True = may attend, hence <code class="i">~mask</code>.</p>
     </div></div></div>
   </section>
 
@@ -335,6 +368,8 @@ pre .ln { display: block; padding: 0 6px; margin: 0 -6px; border-radius: 4px; tr
         <p class="ans">With unit-variance components the dot product has variance \(d_k\), so its typical size is \(\sqrt{d_k}\). Unscaled, large scores push softmax towards one-hot and the gradient through it goes to zero.</p></details>
       <details><summary>Why apply the mask before the softmax instead of zeroing weights after it?</summary>
         <p class="ans">\(-\infty\) before the softmax removes those terms from the normaliser, so the allowed weights still sum to 1. Zeroing afterwards leaves rows that sum to less than 1.</p></details>
+      <details><summary>With \(H\) heads, what is the shape of \(Q\) per head, and how many weights does the layer have?</summary>
+        <p class="ans">\(Q^{(h)}\in\mathbb{R}^{T\times d_k}\) with \(d_k = d_{model}/H\). Weights: \(4\,d_{model}^2\) with no bias (\(W_Q, W_K, W_V, W_O\)), independent of \(H\).</p></details>
       <button class="primary" id="masterAll">Mark chapter mastered</button>
     </div></div></div>
   </section>
@@ -452,6 +487,42 @@ function render() {
   $("inspect").innerHTML = inspect();
   $("prev").disabled = step === 0; $("next").disabled = step === STEPS.length - 1;
 }
+// ---------- two heads: same X, W_Q, W_K, each head gets two of the four dimensions ----------
+const HEADS = [[0, 1], [2, 3]].map(dims => {
+  const pick = M => M.map(r => dims.map(d => r[d]));
+  const q = pick(Q), k = pick(K), v = pick(V);
+  const a = q.map((qi, i) => {
+    const e = k.map((kj, j) => j <= i ? Math.exp(qi.reduce((t, x, c) => t + x * kj[c], 0) / Math.sqrt(dims.length)) : 0);
+    const z = e.reduce((x, y) => x + y);
+    return e.map(x => x / z);
+  });
+  a.forEach(r => console.assert(Math.abs(r.reduce((x, y) => x + y) - 1) < 1e-9, "head rows must sum to 1"));
+  return { dims, v, a, o: mm(a, v) };
+});
+let tok2 = 2;
+$("heads").innerHTML = HEADS.map((h, n) => `<div><h5>Head ${n + 1} <span>dim ${h.dims.map(d => d + 1).join(", ")}</span></h5><div class="grid sm rowfocus">
+  <div class="corner">query \u2193<br>key \u2192</div>${TOK.map(t => `<div class="col">${t}</div>`).join("")}
+  ${TOK.map((t, i) => `<button class="row" data-i="${i}">${t}</button>` + h.a[i].map((w, j) =>
+    `<div class="cell${j > i ? " masked" : w > 0.55 ? " hot" : ""}" data-i="${i}" style="--t:${j > i ? 0 : w.toFixed(3)}">${j > i ? "0" : f(w)}</div>`).join("")).join("")}
+</div></div>`).join("");
+$("heads").onclick = e => { const b = e.target.closest(".row"); if (b) { tok2 = +b.dataset.i; render2(); } };
+function render2() {
+  const i = tok2, t = TOK[i], sp = k => k === 2 ? ' class="split"' : "";
+  $("heads").querySelectorAll(".row").forEach(r => r.setAttribute("aria-pressed", +r.dataset.i === i));
+  $("heads").querySelectorAll(".cell").forEach(c => c.classList.toggle("inrow", +c.dataset.i === i));
+  const o = HEADS.flatMap(h => h.o[i]);
+  $("inspect2").innerHTML = `<table class="blend">
+      <tr><th></th><th colspan="2">head 1</th><th colspan="2" class="split">head 2</th></tr>
+      <tr><th></th>${[1, 2, 3, 4].map((d, k) => `<th${sp(k)}>dim ${d}</th>`).join("")}</tr>
+      <tr><td>q<sub>${t}</sub></td>${Q[i].map((v, k) => `<td${sp(k)}>${f(v)}</td>`).join("")}</tr>
+      <tr class="sum"><td>o<sub>${t}</sub></td>${o.map((v, k) => `<td${sp(k)}><b>${f(v)}</b></td>`).join("")}</tr>
+      <tr class="before"><td>x<sub>${t}</sub></td>${X[i].map((v, k) => `<td${sp(k)}>${f(v)}</td>`).join("")}</tr>
+    </table>
+    <div class="calc">${HEADS.map((h, n) => `head ${n + 1}: ` + TOK.slice(0, i + 1).map((_, j) => `${f(h.a[i][j])}\u00d7[${h.v[j].map(f).join(", ")}]`).join(" + ") + ` = <b>[${h.o[i].map(f).join(", ")}]</b>`).join("<br>")}</div>
+    <p class="defs">Weights: the ${t} row of each matrix. Vectors: v<sub>j</sub> cut to that head's two dims.<br>o<sub>${t}</sub> = the two results side by side, since W<sub>O</sub> = I.</p>`;
+}
+render2();
+
 function go(i) { step = Math.max(0, Math.min(STEPS.length - 1, i)); render(); }
 $("prev").onclick = () => go(step - 1);
 $("next").onclick = () => go(step + 1);
