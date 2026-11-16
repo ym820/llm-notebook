@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attention - LLM notebook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --ink: #131722;
+  --muted: #5d6676;
+  --line: #dde2ea;
+  --heat: #2f3fd0;      /* attention weight ramp */
+  --query: #d9480f;     /* the row you are reading */
+  --done: #1f8a5b;
+  --call: #8a3fc7;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --serif: "Source Serif 4", Georgia, serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #10131a; --surface: #181c26; --ink: #e8ebf2; --muted: #97a0b2;
+    --line: #2a3040; --heat: #7c88ff; --query: #ff8a50; --done: #4cc38a; --call: #c9a0ff;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.5; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; border-radius: 4px; }
+
+.layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 40px; max-width: 1240px; margin: 0 auto; padding: 40px 24px 120px; }
+
+/* chapter map */
+.map { position: sticky; top: 40px; align-self: start; font-size: 14px; }
+.map h2 { font-size: 13px; font-weight: 500; color: var(--muted); margin: 0 0 12px; }
+.map ol { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--line); }
+.map li { padding: 5px 0 5px 14px; margin-left: -1px; border-left: 1px solid transparent; color: var(--muted); }
+.map li.todo { opacity: .55; }
+.map li.here { color: var(--ink); font-weight: 600; border-left-color: var(--ink); }
+
+/* chapter head */
+main { max-width: 940px; }
+h1 { font-family: var(--serif); font-weight: 600; font-size: 44px; line-height: 1.1; letter-spacing: -0.01em; margin: 0 0 12px; }
+.lede { margin: 0 0 20px; font-size: 17px; }
+.lede .katex-display { margin: 0; text-align: left; }
+.lede .katex-display > .katex { text-align: left; }
+.lines p { margin: 0 0 6px; font-size: 16px; }
+.lines b { font-weight: 600; }
+.head-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 32px; }
+.progress { display: flex; gap: 4px; }
+.progress i { width: 28px; height: 4px; border-radius: 2px; background: var(--line); transition: background-color 200ms ease; }
+.progress i.on { background: var(--done); }
+.progress-label { font-size: 13px; color: var(--muted); }
+.link { font-size: 14px; text-decoration: underline; text-underline-offset: 3px; color: var(--ink); }
+
+/* nodes */
+.node { border-top: 1px solid var(--line); }
+.node:last-of-type { border-bottom: 1px solid var(--line); }
+.node-head { display: flex; align-items: center; gap: 12px; padding: 16px 0; }
+.node-toggle { flex: 1; display: flex; align-items: baseline; gap: 12px; text-align: left; }
+.node-n { font-family: var(--mono); font-size: 13px; color: var(--muted); width: 16px; }
+.node-title { font-size: 18px; font-weight: 600; }
+.node-hint { font-size: 13px; color: var(--muted); }
+.master { font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); transition: transform 140ms var(--ease-out), color 200ms ease, border-color 200ms ease; }
+.master:active { transform: scale(0.97); }
+.node.mastered .master { color: var(--done); border-color: var(--done); }
+.node.mastered .node-title { color: var(--muted); }
+.node-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 260ms var(--ease-out); }
+.node.closed .node-body { grid-template-rows: 0fr; }
+.node-inner { overflow: hidden; min-height: 0; transition: opacity 200ms ease; }
+.node.closed .node-inner { opacity: 0; visibility: hidden; }
+.node-pad { padding: 4px 0 32px 28px; }
+
+.prose { font-family: var(--serif); font-size: 18px; line-height: 1.65; max-width: 64ch; }
+.prose p { margin: 0 0 16px; }
+.prose code, .derive code, code.i { font-family: var(--mono); font-size: 0.85em; background: color-mix(in oklab, var(--ink) 7%, transparent); padding: 1px 5px; border-radius: 4px; }
+
+/* derivation steps */
+.derive { list-style: none; margin: 0; padding: 0; counter-reset: d; }
+.derive > li { counter-increment: d; display: grid; grid-template-columns: 28px minmax(0, 1fr); padding: 14px 0; border-top: 1px dashed var(--line); }
+.derive > li:first-child { border-top: 0; padding-top: 0; }
+.derive > li::before { content: counter(d); font-family: var(--mono); font-size: 13px; color: var(--muted); padding-top: 3px; }
+.derive .what { font-weight: 600; margin-bottom: 2px; }
+.derive .why { font-size: 14px; color: var(--muted); }
+.derive .katex-display { margin: 10px 0; text-align: left; overflow-x: auto; overflow-y: hidden; }
+.derive .katex-display > .katex { text-align: left; }
+details.aside { margin-top: 6px; font-size: 14px; color: var(--muted); line-height: 1.7; }
+details.aside summary { font-size: 13px; cursor: pointer; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; list-style: none; }
+details.aside summary::-webkit-details-marker { display: none; }
+details.aside[open] summary { margin-bottom: 8px; }
+
+/* the stage */
+.stage { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+.steps { display: flex; gap: 2px; background: var(--bg); padding: 3px; border-radius: 10px; width: fit-content; max-width: 100%; overflow-x: auto; }
+.steps button { padding: 6px 12px; border-radius: 8px; font-size: 14px; color: var(--muted); white-space: nowrap; transition: transform 140ms var(--ease-out); }
+.steps button:active { transform: scale(0.97); }
+.steps button[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 500; box-shadow: 0 1px 2px rgb(19 23 34 / .12); }
+.step-formula { min-height: 64px; display: flex; flex-direction: column; justify-content: center; margin: 14px 0 6px; }
+.step-formula p { margin: 2px 0 0; font-size: 14px; color: var(--muted); }
+.board { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 28px; align-items: start; margin-top: 12px; }
+.grid { display: grid; grid-template-columns: 56px repeat(4, 64px); gap: 4px; font-family: var(--mono); font-size: 14px; }
+.grid .corner { font-family: var(--sans); font-size: 11px; color: var(--muted); line-height: 1.2; align-self: end; padding-bottom: 4px; }
+.grid .col { text-align: center; color: var(--muted); padding-bottom: 4px; align-self: end; }
+.grid .row { text-align: right; padding-right: 8px; height: 48px; border-radius: 6px; color: var(--muted); transition: color 160ms ease; }
+.grid .row[aria-pressed="true"] { color: var(--query); font-weight: 500; }
+.cell { height: 48px; border-radius: 8px; font-variant-numeric: tabular-nums; position: relative;
+  background: color-mix(in oklab, var(--heat) calc(var(--t) * 100%), var(--bg));
+  color: var(--ink); transition: background-color 320ms var(--ease-out), box-shadow 160ms ease, opacity 200ms ease; }
+.cell.hot { color: #fff; }
+@media (prefers-color-scheme: dark) { .cell.hot { color: #0b0d14; } }
+.cell.masked { background: repeating-linear-gradient(135deg, transparent 0 5px, var(--line) 5px 6px); color: var(--muted); }
+.cell.inline { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--query) 45%, transparent); }
+.cell.sel { box-shadow: 0 0 0 2px var(--query); }
+.grid.rowfocus .cell:not(.inrow) { opacity: .35; }
+.pair { display: flex; gap: 20px; flex-wrap: wrap; }
+.blend tr.hl td { background: color-mix(in oklab, var(--query) 12%, transparent); }
+.blend th:first-child { text-align: left; padding-left: 0; font-weight: 600; color: var(--ink); }
+.calc u { text-decoration-color: var(--query); text-underline-offset: 3px; }
+.inspect { font-size: 14px; min-width: 0; }
+.inspect h4 { margin: 0 0 10px; font-family: var(--mono); font-size: 14px; font-weight: 500; }
+.inspect .calc { font-family: var(--mono); font-size: 13px; line-height: 1.9; background: var(--bg); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: nowrap; }
+.inspect .calc b { color: var(--query); font-weight: 500; }
+.inspect p { margin: 10px 0 0; color: var(--muted); font-family: var(--serif); font-size: 16px; }
+.blend { border-collapse: collapse; font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; margin-bottom: 10px; }
+.blend th { font-family: var(--sans); font-size: 12px; font-weight: 400; color: var(--muted); }
+.blend th, .blend td { padding: 5px 9px; text-align: right; }
+.blend td:first-child { text-align: left; padding-left: 0; }
+.inspect .defs { margin: 10px 0 0; font-family: var(--mono); font-size: 12px; line-height: 1.7; }
+.blend .w { color: var(--heat); }
+.blend .hl { background: color-mix(in oklab, var(--query) 10%, transparent); }
+.blend .sum td { border-top: 1px solid var(--ink); }
+.blend .sum b { color: var(--query); font-weight: 500; }
+.blend .before td { color: var(--muted); }
+.stage-foot { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.nav { display: flex; gap: 8px; }
+.nav button { padding: 7px 14px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; background: var(--surface); transition: transform 140ms var(--ease-out); }
+.nav button:active { transform: scale(0.97); }
+.nav button:disabled { opacity: .4; cursor: default; }
+.kbd { font-size: 12px; color: var(--muted); }
+.toy { font-size: 13px; color: var(--muted); margin: 12px 0 0; max-width: 70ch; }
+.toy b { font-weight: 500; color: var(--ink); }
+
+/* code */
+pre { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.7; }
+pre .ln { display: block; padding: 0 6px; margin: 0 -6px; border-radius: 4px; transition: background-color 200ms ease; }
+.pairs { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 4px 18px; }
+.pair-row { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 16px; align-items: center; padding: 14px 0; border-top: 1px dashed var(--line); }
+.pair-row:first-child { border-top: 0; }
+.pair-row .lab b { display: block; font-size: 14px; font-weight: 600; }
+.pair-row .lab span { font-size: 12px; color: var(--muted); }
+.lines-code { overflow-x: auto; }
+.cl { display: flex; gap: 14px; align-items: baseline; white-space: pre; font-family: var(--mono); font-size: 12.5px; line-height: 1.9; }
+.cl .tag { flex: 0 0 56px; font-family: var(--sans); font-size: 11px; color: var(--muted); }
+.cl code { font: inherit; }
+.hljs-string { color: var(--done); } .hljs-number { color: var(--query); } .hljs-comment { color: var(--muted); }
+.hljs-keyword, .hljs-literal, .hljs-built_in { color: var(--heat); } .call { color: var(--call); }
+@media (max-width: 860px) { .pair-row { grid-template-columns: 1fr; gap: 6px; } }
+.src { font-size: 13px; color: var(--muted); margin: 0 0 8px; font-family: var(--mono); }
+
+/* self-check */
+.quiz details { border-top: 1px dashed var(--line); padding: 14px 0; }
+.quiz details:first-child { border-top: 0; padding-top: 0; }
+.quiz summary { cursor: pointer; font-size: 16px; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+.quiz summary::-webkit-details-marker { display: none; }
+.quiz summary::after { content: "Show answer"; font-family: var(--sans); font-size: 13px; color: var(--muted); white-space: nowrap; padding-top: 4px; }
+.quiz details[open] summary::after { content: "Hide"; }
+.quiz .ans { font-size: 15px; color: var(--muted); margin: 8px 0 0; max-width: 62ch; }
+.primary { margin-top: 16px; padding: 9px 16px; border-radius: 9px; background: var(--ink); color: var(--bg); font-weight: 500; transition: transform 140ms var(--ease-out); }
+.primary:active { transform: scale(0.97); }
+
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; gap: 24px; padding: 24px 16px 80px; }
+  .map { position: static; }
+  .map ol { display: flex; gap: 14px; overflow-x: auto; border-left: 0; padding-bottom: 6px; }
+  .map li { border: 0; padding: 0; white-space: nowrap; }
+  h1 { font-size: 34px; }
+  .node-pad { padding-left: 0; }
+  .board { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: 48px repeat(4, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .node-body { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="map" aria-label="Chapters">
+  <h2>One sentence through the model</h2>
+  <ol>
+    <li class="todo">BPE</li>
+    <li class="todo">Embedding</li>
+    <li class="todo">RMSNorm</li>
+    <li class="todo">RoPE</li>
+    <li class="here" aria-current="page">Attention</li>
+    <li class="todo">SwiGLU</li>
+    <li class="todo">Transformer block</li>
+    <li class="todo">Loss</li>
+    <li class="todo">AdamW</li>
+    <li class="todo">Training runs</li>
+    <li class="todo">Decoding</li>
+    <li class="todo">Resource accounting</li>
+  </ol>
+</nav>
+
+<main>
+  <h1>Attention</h1>
+  <p class="lede">$$\mathrm{Attention}(Q,K,V)=\mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}+M\right)V$$</p>
+  <div class="head-row">
+    <div class="progress" id="progress" aria-hidden="true"></div>
+    <span class="progress-label" id="progressLabel"></span>
+    <a class="link" href="#check">Test me first</a>
+  </div>
+
+  <!-- 1 -->
+  <section class="node" data-id="intuition">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">1</span><span class="node-title">Intuition</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad lines">
+      <p><b>Goal</b>: let token \(i\) pull information from tokens \(j \le i\).</p>
+      <p><b>Query</b> \(q_i\): what token \(i\) looks for.</p>
+      <p><b>Key</b> \(k_j\): what token \(j\) offers.</p>
+      <p><b>Value</b> \(v_j\): what token \(j\) hands over.</p>
+      <p><b>Score</b> \(S_{ij} = q_i\cdot k_j\): how well \(k_j\) matches \(q_i\).</p>
+      <p><b>Weight</b> \(A_{ij}\): softmax of the scores over \(j\).</p>
+      <p><b>Output</b> \(o_i = \sum_j A_{ij}\,v_j\): weighted sum of values.</p>
+    </div></div></div>
+  </section>
+
+  <!-- 2 -->
+  <section class="node" data-id="derivation">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">2</span><span class="node-title">Derivation</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad">
+      <ol class="derive">
+        <li><div>
+          <div class="what">Project the input three ways</div>
+          $$Q = XW_Q,\quad K = XW_K,\quad V = XW_V \qquad X\in\mathbb{R}^{T\times d_{model}},\;\; Q,K\in\mathbb{R}^{T\times d_k},\;\; V\in\mathbb{R}^{T\times d_v}$$
+          <details class="aside"><summary>Why</summary>Row \(i\) belongs to token \(i\). Separate \(W_Q\), \(W_K\): what a token looks for can differ from what it offers.</details>
+        </div></li>
+        <li><div>
+          <div class="what">Score every query against every key</div>
+          $$S = QK^\top \in \mathbb{R}^{T\times T},\qquad S_{ij} = q_i\cdot k_j = \sum_{c=1}^{d_k} Q_{ic}K_{jc}$$
+          <div class="why">Rows = queries, columns = keys. In code: <code>"... q d_k, ... k d_k -> ... q k"</code>.</div>
+        </div></li>
+        <li><div>
+          <div class="what">Divide by \(\sqrt{d_k}\)</div>
+          $$\tilde S = \frac{QK^\top}{\sqrt{d_k}}$$
+                    <details class="aside">
+            <summary>Why</summary>
+            Problem: unscaled scores grow with \(d_k\). Softmax goes one-hot, gradient \(\approx 0\).<br>Setting: components of \(q\), \(k\) independent, mean 0, variance 1. Then \(\mathrm{Var}(q_ck_c) = \mathbb{E}[q_c^2]\,\mathbb{E}[k_c^2] = 1\).
+            $$\mathrm{Var}(q\cdot k) = \sum_{c=1}^{d_k}\mathrm{Var}(q_ck_c) = d_k \;\;\Longrightarrow\;\; \mathrm{Var}\!\left(\frac{q\cdot k}{\sqrt{d_k}}\right) = 1$$
+          </details>
+        </div></li>
+        <li><div>
+          <div class="what">Mask the future</div>
+          $$M_{ij} = \begin{cases} 0 & j \le i \\ -\infty & j > i \end{cases}$$
+          <details class="aside"><summary>Why</summary>Before softmax: \(e^{-\infty}=0\), rows still sum to 1.<br>After softmax: rows sum to less than 1.</details>
+        </div></li>
+        <li><div>
+          <div class="what">Softmax each row</div>
+          $$A_{ij} = \frac{\exp(\tilde S_{ij} + M_{ij})}{\sum_{j'}\exp(\tilde S_{ij'} + M_{ij'})},\qquad \sum_j A_{ij} = 1$$
+          <div class="why">Row \(i\) of \(A\): how token \(i\) splits its attention.</div>
+        </div></li>
+        <li><div>
+          <div class="what">Blend the values</div>
+          $$O = AV \in \mathbb{R}^{T\times d_v},\qquad o_i = \sum_j A_{ij}\,v_j$$
+        </div></li>
+      </ol>
+    </div></div></div>
+  </section>
+
+  <!-- 3 -->
+  <section class="node" data-id="example">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">3</span><span class="node-title">Worked example</span><span class="node-hint">the cat sat down</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad">
+      <div class="stage" id="stage">
+        <div class="steps" role="tablist" id="steps"></div>
+        <div class="step-formula" id="formula"></div>
+        <div class="board">
+          <div class="grid" id="grid"></div>
+          <div class="inspect" id="inspect" aria-live="polite"></div>
+        </div>
+        <div class="stage-foot">
+          <span class="kbd">Click a cell. ← → change step.</span>
+          <div class="nav"><button id="prev">Back</button><button id="next">Next step</button></div>
+        </div>
+      </div>
+      <p class="toy"><b>Toy:</b> \(T=4\), \(d_k=4\), 1 head, \(W_V=I\), hand-picked weights.<br><b>Yours:</b> \(T=256\), \(d_{model}=512\), 16 heads, so \(d_k=32\) and the divisor is \(\sqrt{32}\approx5.66\).</p>
+    </div></div></div>
+  </section>
+
+  <!-- 4 -->
+  <section class="node" data-id="code">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">4</span><span class="node-title">Code</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad">
+<div class="pairs"><div class="pair-row"><div class="lab"><b>Scores, Scale</b><span>\(QK^\top/\sqrt{d_k}\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>score = einsum(Q, K, "... q d_k, ... k d_k -> ... q k") / math.sqrt(d_k)</code></div><div class="cl"><span class="tag">nanoGPT</span><code>att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))</code></div></div></div><div class="pair-row"><div class="lab"><b>Mask</b><span>\(+\,M\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>score.masked_fill_(~mask, float("-inf"))</code></div><div class="cl"><span class="tag">nanoGPT</span><code>att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))</code></div></div></div><div class="pair-row"><div class="lab"><b>Softmax, Blend</b><span>\(\mathrm{softmax}(\cdot)\,V\)</span></div><div class="lines-code"><div class="cl"><span class="tag">mine</span><code>attention = einsum(softmax(score, dim=-1), V, "... q k, ... k d_v -> ... q d_v")</code></div><div class="cl"><span class="tag">nanoGPT</span><code>att = F.softmax(att, dim=-1)</code></div><div class="cl"><span class="tag"></span><code>y = att @ v</code></div></div></div><div class="pair-row"><div class="lab"><b>All five steps</b></div><div class="lines-code"><div class="cl"><span class="tag">PyTorch</span><code>y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></div></div></div></div>
+      <p class="toy">mine: <code class="i">cs336_basics/model.py:187</code>. nanoGPT: <code class="i">karpathy/nanoGPT model.py</code> (MIT). PyTorch: the built-in, one fused call.<br>Your mask is <code class="i">torch.tril(torch.ones((T, T), dtype=torch.bool))</code>. True = may attend, hence <code class="i">~mask</code>.</p>
+    </div></div></div>
+  </section>
+
+  <!-- 5 -->
+  <section class="node" data-id="check" id="check">
+    <div class="node-head">
+      <button class="node-toggle" aria-expanded="true"><span class="node-n">5</span><span class="node-title">Self-check</span></button>
+      <button class="master">Mark mastered</button>
+    </div>
+    <div class="node-body"><div class="node-inner"><div class="node-pad quiz">
+      <details><summary>Write the full attention formula with the shape of every intermediate.</summary>
+        <p class="ans">\(Q,K\in\mathbb{R}^{T\times d_k}\), \(V\in\mathbb{R}^{T\times d_v}\). \(QK^\top/\sqrt{d_k}\in\mathbb{R}^{T\times T}\), add \(M\), softmax over the last axis gives \(A\in\mathbb{R}^{T\times T}\), then \(AV\in\mathbb{R}^{T\times d_v}\).</p></details>
+      <details><summary>Where does \(\sqrt{d_k}\) come from, and what breaks without it?</summary>
+        <p class="ans">With unit-variance components the dot product has variance \(d_k\), so its typical size is \(\sqrt{d_k}\). Unscaled, large scores push softmax towards one-hot and the gradient through it goes to zero.</p></details>
+      <details><summary>Why apply the mask before the softmax instead of zeroing weights after it?</summary>
+        <p class="ans">\(-\infty\) before the softmax removes those terms from the normaliser, so the allowed weights still sum to 1. Zeroing afterwards leaves rows that sum to less than 1.</p></details>
+      <button class="primary" id="masterAll">Mark chapter mastered</button>
+    </div></div></div>
+  </section>
+</main>
+</div>
+
+<script>
+// ---------- toy numbers (hand-picked, computed for real) ----------
+const TOK = ["the", "cat", "sat", "down"];
+const X = [[0.1, 0.0, 1.0, 0.2], [1.0, 0.1, 0.0, 0.3], [0.1, 1.0, 0.0, 0.5], [0.0, 0.3, 0.2, 1.0]];
+// hand-picked so each token has one clear target: cat -> the, sat -> cat, down -> sat
+const WQ = [[0, 0, 2, 0], [2, 0, 0, 0], [0, 0, 1, 0], [0, 2, 0, 0]];
+const WK = [[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 2]];
+const mm = (A, B) => A.map(r => B[0].map((_, c) => r.reduce((s, v, k) => s + v * B[k][c], 0)));
+const Q = mm(X, WQ), K = mm(X, WK), V = X, DK = 4, T = 4;
+const raw = Q.map(q => K.map(k => q.reduce((s, v, c) => s + v * k[c], 0)));
+const scaled = raw.map(r => r.map(v => v / Math.sqrt(DK)));
+const A = scaled.map((r, i) => {
+  const e = r.map((v, j) => j <= i ? Math.exp(v) : 0), z = e.reduce((a, b) => a + b);
+  return e.map(v => v / z);
+});
+const O = mm(A, V);
+const MAXRAW = Math.max(...raw.flat());
+// self-check: fails loudly if the toy math breaks
+A.forEach(r => console.assert(Math.abs(r.reduce((a, b) => a + b) - 1) < 1e-9, "softmax rows must sum to 1"));
+console.assert(A[2][1] > A[2][0] && A[2][1] > A[2][2], "sat should attend most to cat");
+
+const f = v => v.toFixed(2);
+const STEPS = [
+  { name: "Scores", tex: "S = QK^\\top", note: "Row = query, column = key. No mask yet." },
+  { name: "Scale", tex: "\\tilde S = S / \\sqrt{d_k} = S / 2", note: "Every score halves. Ranking within a row is unchanged." },
+  { name: "Mask", tex: "\\tilde S + M", note: "Key after query (j > i) becomes −∞." },
+  { name: "Softmax", tex: "A = \\mathrm{softmax}(\\tilde S + M)", note: "Each row sums to 1." },
+  { name: "Blend", tex: "O = AV", note: "Row i of O = row i of A times V. Pick a row." },
+];
+
+// ---------- stage ----------
+let step = 0, sel = [2, 1];
+const $ = id => document.getElementById(id);
+const grid = $("grid"), stepsEl = $("steps");
+
+STEPS.forEach((s, i) => {
+  const b = document.createElement("button");
+  b.textContent = s.name; b.setAttribute("role", "tab");
+  b.onclick = () => go(i);
+  stepsEl.append(b);
+});
+grid.innerHTML = `<div class="corner">query ↓<br>key →</div>` + TOK.map(t => `<div class="col">${t}</div>`).join("") +
+  TOK.map((t, i) => `<button class="row" data-i="${i}">${t}</button>` +
+    TOK.map((_, j) => `<button class="cell" data-i="${i}" data-j="${j}"></button>`).join("")).join("");
+grid.onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  sel = [+b.dataset.i, b.dataset.j === undefined ? Math.min(sel[1], +b.dataset.i) : +b.dataset.j];
+  render();
+};
+
+function cellState(i, j) {
+  const masked = j > i;
+  if (step === 0) return { txt: f(raw[i][j]), t: raw[i][j] / MAXRAW };
+  if (step === 1) return { txt: f(scaled[i][j]), t: scaled[i][j] / MAXRAW };
+  if (step === 2) return masked ? { txt: "−∞", masked } : { txt: f(scaled[i][j]), t: scaled[i][j] / MAXRAW };
+  return masked ? { txt: "0", masked } : { txt: f(A[i][j]), t: A[i][j] };
+}
+
+function inspect() {
+  const [i, j] = sel, at = `[${TOK[i]}, ${TOK[j]}]`;
+  const mat = (name, M, hi) => `<table class="blend"><tr><th>${name}</th><th colspan="4"></th></tr>${M.map((r, k) =>
+    `<tr${k === hi ? ' class="hl"' : ""}><td>${TOK[k]}</td>${r.map(v => `<td>${f(v)}</td>`).join("")}</tr>`).join("")}</table>`;
+  if (step === 0) {
+    const top = Q[i].map((v, c) => v * K[j][c]).reduce((b, d, k, a) => d > a[b] ? k : b, 0);
+    const terms = Q[i].map((v, c) => c === top ? `<u>${f(v)}×${f(K[j][c])}</u>` : `${f(v)}×${f(K[j][c])}`).join(" + ");
+    return `<h4>S${at} = q<sub>${TOK[i]}</sub> · k<sub>${TOK[j]}</sub></h4>
+      <div class="pair">${mat("Q", Q, i)}${mat("K", K, j)}</div>
+      <div class="calc">${terms} = <b>${f(raw[i][j])}</b></div>`;
+  }
+  if (step === 1) return `<h4>S̃${at}</h4><div class="calc">${f(raw[i][j])} / √4 = <b>${f(scaled[i][j])}</b></div>`;
+  if (step === 2) return `<h4>(S̃ + M)${at}</h4><div class="calc">j = ${j}, i = ${i}, so M = ${j > i ? "−∞" : "0"}<br>${f(scaled[i][j])} + ${j > i ? "(−∞)" : "0"} = <b>${j > i ? "−∞" : f(scaled[i][j])}</b></div>`;
+  const allowed = TOK.slice(0, i + 1);
+  if (step === 3) {
+    if (j > i) return `<h4>A${at}</h4><div class="calc">exp(−∞) = <b>0</b></div>`;
+    const es = allowed.map((_, c) => Math.exp(scaled[i][c])), z = es.reduce((a, b) => a + b);
+    return `<h4>A${at}</h4>
+      <div class="calc">exp(${f(scaled[i][j])}) = ${f(es[j])}<br>row sum = ${es.map((v, c) => c === j ? `<u>${f(v)}</u>` : f(v)).join(" + ")} = ${f(z)}<br>${f(es[j])} / ${f(z)} = <b>${f(A[i][j])}</b></div>`;
+  }
+  // column that grew the most gets the worked sum
+  const c = O[i].map((v, k) => v - X[i][k]).reduce((best, d, k, a) => d > a[best] ? k : best, 0);
+  const hl = k => k === c ? ' class="hl"' : "";
+  return `<h4>o<sub>${TOK[i]}</sub> = Σ<sub>j</sub> A[${TOK[i]}, j] · v<sub>j</sub></h4>
+    <table class="blend">
+      <tr><th></th><th>A[${TOK[i]}, j]</th>${[1, 2, 3, 4].map((d, k) => `<th${hl(k)}>dim ${d}</th>`).join("")}</tr>
+      ${allowed.map((t, j) => `<tr><td>v<sub>${t}</sub></td><td class="w">${f(A[i][j])} ×</td>${V[j].map((v, k) => `<td${hl(k)}>${f(v)}</td>`).join("")}</tr>`).join("")}
+      <tr class="sum"><td>o<sub>${TOK[i]}</sub></td><td class="w">=</td>${O[i].map((v, k) => `<td${hl(k)}><b>${f(v)}</b></td>`).join("")}</tr>
+      <tr class="before"><td>x<sub>${TOK[i]}</sub></td><td class="w">input</td>${X[i].map((v, k) => `<td${hl(k)}>${f(v)}</td>`).join("")}</tr>
+    </table>
+    <div class="calc">dim ${c + 1}: ${allowed.map((_, j) => `${f(A[i][j])}×${f(V[j][c])}`).join(" + ")} = <b>${f(O[i][c])}</b></div>
+    <p class="defs">A[${TOK[i]}, j]: the ${TOK[i]} row of the matrix.<br>v<sub>j</sub> = x<sub>j</sub> here, since W<sub>V</sub> = I.</p>`;
+}
+
+function render() {
+  [...stepsEl.children].forEach((b, i) => b.setAttribute("aria-selected", i === step));
+  $("formula").innerHTML = `<div>${katex.renderToString(STEPS[step].tex, { displayMode: false })}</div><p>${STEPS[step].note}</p>`;
+  grid.classList.toggle("rowfocus", step >= 3);
+  grid.querySelectorAll(".cell").forEach(c => {
+    const i = +c.dataset.i, j = +c.dataset.j, s = cellState(i, j);
+    c.textContent = s.txt;
+    c.style.setProperty("--t", s.masked ? 0 : Math.max(0, Math.min(1, s.t)).toFixed(3));
+    c.classList.toggle("masked", !!s.masked);
+    c.classList.toggle("hot", !s.masked && s.t > 0.55);
+    c.classList.toggle("sel", step < 4 && i === sel[0] && j === sel[1]);
+    c.classList.toggle("inline", step < 3 && (i === sel[0] || j === sel[1]));
+    c.classList.toggle("inrow", i === sel[0]);
+    c.setAttribute("aria-label", `${TOK[i]} to ${TOK[j]}: ${s.txt}`);
+  });
+  grid.querySelectorAll(".row").forEach(r => r.setAttribute("aria-pressed", +r.dataset.i === sel[0]));
+  $("inspect").innerHTML = inspect();
+  $("prev").disabled = step === 0; $("next").disabled = step === STEPS.length - 1;
+}
+function go(i) { step = Math.max(0, Math.min(STEPS.length - 1, i)); render(); }
+$("prev").onclick = () => go(step - 1);
+$("next").onclick = () => go(step + 1);
+$("stage").addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { go(step + 1); e.preventDefault(); }
+  if (e.key === "ArrowLeft") { go(step - 1); e.preventDefault(); }
+});
+
+// ---------- nodes: collapse and mastery ----------
+const KEY = "llm-notebook:attention";
+let mastered = {};
+try { mastered = JSON.parse(localStorage.getItem(KEY)) || {}; } catch {}
+const nodes = [...document.querySelectorAll(".node")];
+nodes.forEach(() => $("progress").append(document.createElement("i")));
+function setOpen(n, open) {
+  n.classList.toggle("closed", !open);
+  n.querySelector(".node-toggle").setAttribute("aria-expanded", open);
+}
+function paint() {
+  nodes.forEach((n, i) => {
+    const m = !!mastered[n.dataset.id];
+    n.classList.toggle("mastered", m);
+    n.querySelector(".master").textContent = m ? "Mastered" : "Mark mastered";
+    $("progress").children[i].classList.toggle("on", m);
+  });
+  const k = nodes.filter(n => mastered[n.dataset.id]).length;
+  $("progressLabel").textContent = `${k} of ${nodes.length} mastered`;
+  try { localStorage.setItem(KEY, JSON.stringify(mastered)); } catch {}
+}
+nodes.forEach(n => {
+  n.querySelector(".node-toggle").onclick = () => setOpen(n, n.classList.contains("closed"));
+  n.querySelector(".master").onclick = () => {
+    mastered[n.dataset.id] = !mastered[n.dataset.id];
+    setOpen(n, !mastered[n.dataset.id]); paint();
+  };
+  if (mastered[n.dataset.id]) setOpen(n, false);
+});
+$("masterAll").onclick = () => { nodes.forEach(n => { mastered[n.dataset.id] = true; setOpen(n, false); }); paint(); scrollTo({ top: 0 }); };
+// "Test me first" must open the self-check even if it is collapsed
+document.querySelector('a[href="#check"]').onclick = () => setOpen($("check"), true);
+paint();
+
+window.addEventListener("DOMContentLoaded", () => {
+  renderMathInElement(document.body, { delimiters: [{ left: "$$", right: "$$", display: true }, { left: "\\(", right: "\\)", display: false }] });
+  render();
+  document.querySelectorAll(".cl code").forEach(el => {
+    el.innerHTML = hljs.highlight(el.textContent, { language: "python" }).value;
+    // hljs leaves call names plain; color identifiers followed by "("
+    [...el.childNodes].filter(n => n.nodeType === 3).forEach(n => {
+      const span = document.createElement("span");
+      span.innerHTML = n.textContent.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))
+        .replace(/([A-Za-z_]\w*)(?=\()/g, '<span class="call">$1</span>');
+      n.replaceWith(...span.childNodes);
+    });
+  });
+});
+</script>
+</body>
+</html>
