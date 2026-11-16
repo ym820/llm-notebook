@@ -150,25 +150,20 @@
       </div>
       <p class="toy"><b>Toy:</b> one token (cat), 4 sublayers. Every sublayer is the same fixed map \(F(x)=2Px\), where \(P\) shifts each dimension one place to the right, so \(\mathrm{RMS}(F(x))=2\,\mathrm{RMS}(x)\). \(g=1\).<br><b>Yours:</b> 4 blocks, so 8 sublayers, each an attention or a SwiGLU with learned weights.</p>
 
-      <div class="sub">No normalization</div>
+      <div class="sub">Ablation 1: layer normalization</div>
+      <div class="prose">
+        <p>It is often said that layer normalization is important for the stability of Transformer training. To see why, consider a block with RMSNorm removed from both sub-layers:</p>
+        $$z = x + \mathrm{MultiHeadSelfAttention}(x),\qquad y = z + \mathrm{FFN}(z).$$
+        <p>Each sub-layer is built from matrix multiplications, so the size of its output scales with the size of its input. If a sub-layer amplifies its input by a factor \(k\), the residual stream can grow by a factor of \(1+k\) per sub-layer, and by \((1+k)^L\) after \(L\) of them. In the toy example above, where \(k=2\), the RMS of the stream goes <span id="seqNo"></span> over four sub-layers.</p>
+        <p>With RMSNorm, a sub-layer always receives an input of RMS 1, regardless of how large the stream is, since \(\mathrm{RMSNorm}(c\,x)=\mathrm{RMSNorm}(x)\). Each sub-layer then adds a bounded amount to the stream, and the stream grows at most linearly with depth (<span id="seqPre"></span> in the toy example).</p>
+        <p>This explains the sensitivity to the learning rate. Because the output scales like \((1+k)^L\), a small change in the weights produces a large change in the stream. AdamW changes every weight by roughly the learning rate at each step, so at a high learning rate a single step can change \(k\) enough for the activations to blow up.</p>
+        <p>In your runs, training without RMSNorm diverges to NaN at learning rates of 3e-3 and 1e-3, stalls near a loss of 7.46 at 3e-4, and is stable only at 1e-4:</p>
+      </div>
       <img class="plot" src="img/no-norm-lr-comparison.png" alt="Validation loss for the model without norm at four learning rates. Only 1e-4 decreases steadily." loading="lazy">
-      <div class="lines report">
-        <p><b>Setup.</b> Same as the baseline, with the two norms in each block removed: \(x \leftarrow x + F(x)\). <code class="i">ln_final</code> is kept. LR swept over 3e-3, 1e-3, 3e-4, 1e-4.</p>
-        <p><b>Result.</b> 3e-3 and 1e-3 diverge to NaN, 3e-4 stalls near 7.46, and only 1e-4 trains.</p>
-        <p><b>Stream size.</b> Without a norm, a sublayer's output scales with its input, so each layer multiplies the stream instead of adding to it. In the toy the RMS goes <span id="seqNo"></span>. With pre-norm the same four layers give <span id="seqPre"></span>.</p>
-        <p><b>Why a high LR diverges.</b> If each sublayer amplifies its input by \(k\), the output scales like \((1+k)^L\), so a small change in the weights changes the stream a lot. AdamW moves every weight by roughly the LR each step. At a high LR, one step changes \(k\) enough to blow up the stream.</p>
+      <div class="prose">
+        <p>Even at 1e-4, the model without RMSNorm reaches a validation loss of 2.08, compared to 1.80 for the baseline at the same learning rate and 1.34 for the best baseline at 3e-3. Of the 0.74 gap to the best baseline, about 0.46 is due to the lower learning rate and about 0.28 to removing the normalization itself.</p>
       </div>
       <img class="plot" src="img/no-norm_ablation.png" alt="Validation loss: no norm at 1e-4 stays above the baseline at 1e-4, which stays above the baseline at 3e-3." loading="lazy">
-      <table class="blend">
-        <tr><th>Model</th><th>Val loss</th></tr>
-        <tr><td>Best baseline, LR 3e-3</td><td>1.3387</td></tr>
-        <tr><td>Baseline, LR 1e-4</td><td>1.8004</td></tr>
-        <tr><td>No norm, LR 1e-4</td><td>2.0827</td></tr>
-      </table>
-      <div class="lines report">
-        <p><b>Cost at the LR that works.</b> No norm ends 0.74 above the best baseline. About 0.46 of that comes from the lower LR and about 0.28 from removing the norm.</p>
-        <p><b>Takeaway.</b> The norm is what makes a high LR usable. Without it the model only trains at an LR 30× lower, and is worse even there.</p>
-      </div>
       <details class="aside"><summary>Formal version: no norm</summary>
       <ol class="derive">
         <li><div>
@@ -189,15 +184,21 @@
       </ol>
       </details>
 
-      <div class="sub">Post normalization</div>
+      <div class="sub">Ablation 2: pre-norm and post-norm</div>
+      <div class="prose">
+        <p>The position of the normalization also matters. Pre-norm Transformer blocks are defined as</p>
+        $$z = x + \mathrm{MultiHeadSelfAttention}(\mathrm{RMSNorm}(x)),\qquad y = z + \mathrm{FFN}(\mathrm{RMSNorm}(z)),$$
+        <p>while the original Transformer [Vaswani et al., 2017] used a post-norm approach:</p>
+        $$z = \mathrm{RMSNorm}(x + \mathrm{MultiHeadSelfAttention}(x)),\qquad y = \mathrm{RMSNorm}(z + \mathrm{FFN}(z)).$$
+        <p>In the forward pass, both variants keep the activations under control. Post-norm resets the stream to RMS 1 after every sub-layer (<span id="seqPost"></span> in the toy example), while pre-norm lets the stream grow but normalizes whatever enters a sub-layer.</p>
+        <p>The difference is in the backward pass. In pre-norm, the residual connection is outside the normalization, so there is a clean "residual stream" without any normalization going from the input embeddings to the final output, and the gradient can reach every layer along it. In post-norm, the residual connection is inside the normalization, so every path from the loss to an early layer passes through an RMSNorm at each sub-layer (8 in your model).</p>
+        <p>Xiong et al. [2020] show that, at initialization, a post-norm Transformer has large gradients for the parameters near the output layer, which makes training with a large learning rate unstable. This is why post-norm models rely on learning rate warm-up, and why moving the normalization to the sub-layer input improves training stability [Nguyen and Salazar, 2019; Xiong et al., 2020].</p>
+        <p>Your runs are consistent with this. At a learning rate of 3e-3, post-norm tracks the pre-norm baseline closely, staying slightly above it. At 1e-2, the validation loss stays near 6 until about step 9.5k despite the 300-step warm-up, whereas the pre-norm baseline at 1e-2 reaches 1.36 (post-norm values are read off the plot):</p>
+      </div>
       <img class="plot" src="img/post-norm_ablation.png" alt="Validation loss: post-norm at 3e-3 tracks the baseline closely. Post-norm at 1e-2 stays flat near 6 for most of training." loading="lazy">
-      <div class="lines report">
-        <p><b>Setup.</b> The norm moves from the sublayer's input to after the addition: \(x \leftarrow \mathrm{Norm}(x + F(x))\). Run at LR 3e-3 and 1e-2.</p>
-        <p><b>Result.</b> At 3e-3, post-norm tracks the baseline and stays slightly above it at every eval. At 1e-2 it sits near 6 until about step 9.5k, while the pre-norm baseline at 1e-2 ends at 1.36. Values are read off the plot.</p>
-        <p><b>Stream size.</b> The stream is reset to RMS 1 after every sublayer (toy: <span id="seqPost"></span>), so the forward pass is as controlled as in pre-norm. The difference is in the backward pass.</p>
-        <p><b>Gradient path.</b> In pre-norm the "+" is outside the norm, so the gradient reaches every layer through a path with no norm on it. In post-norm the "+" is inside the norm, so every path crosses a norm at each of the 8 sublayers.</p>
-        <p><b>Why 1e-2 stalls.</b> Xiong et al. (2020) show that at initialization post-norm gives large gradients to the layers near the output, which makes a large LR unstable, and that warm-up is the usual remedy. Your 300-step warm-up was enough at 3e-3 but not at 1e-2. The loss only starts to fall late, once cosine decay has lowered the LR.</p>
-        <p><b>Takeaway.</b> Post-norm matches pre-norm at a safe LR, but its usable LR range is narrower.</p>
+      <div class="prose">
+        <p>Pre-norm has two costs. Since nothing normalizes the stream itself, an additional normalization is needed after the final Transformer block (your <code>ln_final</code>). And since the stream grows while each update stays bounded, later sub-layers change the stream proportionally less: in the toy example, the ratio of update to stream falls from <span id="rel1"></span> at the first sub-layer to <span id="rel4"></span> at the fourth.</p>
+        <p>In practice these costs are small compared to the gain in stability, and the pre-norm Transformer is now the standard used in language models (e.g., GPT-3, LLaMA, PaLM).</p>
       </div>
       <details class="aside"><summary>Formal version: gradient path, post-norm vs pre-norm</summary>
       <ol class="derive">
@@ -223,16 +224,6 @@
         </div></li>
       </ol>
       </details>
-
-      <div class="sub">Why modern models use pre-norm</div>
-      <div class="lines report">
-        <p><b>LR range.</b> Pre-norm trains at both 3e-3 (1.34) and 1e-2 (1.36). Post-norm fails at 1e-2, and no norm fails above 1e-4.</p>
-        <p><b>Depth.</b> Each sublayer sees an input of RMS 1, so it adds a bounded amount however deep the stack is, and the gradient has a norm-free path to every layer.</p>
-        <p><b>Cost 1.</b> Nothing normalizes the stream itself, so one extra norm is needed before the LM head. That is <code class="i">ln_final</code>.</p>
-        <p><b>Cost 2.</b> The stream keeps growing while each update stays the same size, so later sublayers change it proportionally less. In the toy, update ÷ stream falls from <span id="rel1"></span> at layer 1 to <span id="rel4"></span> at layer 4.</p>
-        <p><b>Takeaway.</b> GPT-2 moved the norm to the sublayer input in 2019, and Llama and your model do the same. A wide LR range and easy depth cost one extra norm.</p>
-      </div>
-      <details class="aside"><summary>Sources</summary>Post-norm with warm-up: Vaswani et al. 2017. Norm moved to the sublayer input, plus a final norm: GPT-2, Radford et al. 2019.<br>Large gradients near the output in post-norm at initialization: Xiong et al. 2020, "On Layer Normalization in the Transformer Architecture".</details>
     </div></div></div>
   </section>
 
