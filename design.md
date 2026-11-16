@@ -42,7 +42,7 @@ Each chapter has five nodes, plus an Ablation node when the assignment ablates t
 2. **Derivation**: numbered steps, each a name plus a formula with shapes. The "why" is collapsed behind a toggle.
 3. **Worked example**: a stepper over one small matrix. Clicking a cell shows its arithmetic. A variant of the topic (for example two heads) gets a second, smaller stage under the first, reusing the same inputs.
 4. **Code**: one row per step, comparing Yikai's line with a reference line.
-5. **Ablation** (only where one exists): no code diffs and no comparison table. Written in the style of the cs336 handout (`cs336_assignment1_basics.pdf`, for example section 3.4 and section 7.3): connected textbook paragraphs in the "we" and "your runs" voice, context first (what the original design was, what changed), display equations for each variant, an explicit intuition, inline citations like [Xiong et al., 2020], and a closing statement of what is standard today. No rhetorical questions, no bold run-in labels, no em dashes. Plots sit inline where the text refers to them. The formal derivation sits behind a collapsed "Formal version" toggle. One stage with a switch compares the variants on the same toy input. Plots live in `img/`, downsized from the cs336 `images/`. Ablations live in the chapter of the component they remove: no norm and post-norm in RMSNorm, SiLU in SwiGLU, NoPE in RoPE.
+5. **Ablation** (only where one exists): no code diffs and no comparison table. Written in the style of the cs336 handout (`cs336_assignment1_basics.pdf`, for example section 3.4 and section 7.3): connected textbook paragraphs in the "we" and "your runs" voice, context first (what the original design was, what changed), display equations for each variant, an explicit intuition, inline citations like [Xiong et al., 2020], and a closing statement of what is standard today. No rhetorical questions, no bold run-in labels, no em dashes. Do not include Yikai's run results or plots here. After each claim, give a straightforward example: the simplest numbers that show the effect (for example a one-number stream going 1 → 3 → 9 → 27 → 81), set in a small monospace block introduced by "Example.". The formal derivation sits behind a collapsed "Formal version" toggle. One stage with a switch compares the variants on the same toy input. Ablations live in the chapter of the component they remove: no norm and post-norm in RMSNorm, SiLU in SwiGLU, NoPE in RoPE.
 6. **Self-check**: three questions with hidden answers, and a button to mark the chapter mastered. A "Test me first" link at the top jumps here.
 
 ## Conventions
@@ -94,7 +94,7 @@ Every symbol used in the example must be defined where it appears (for example w
 | 0 | Overview: one sentence through the whole model | not started |
 | 1 | BPE: encoding and training | not started |
 | 2 | Embedding | not started |
-| 3 | RMSNorm and pre-norm, with no-norm and post-norm ablations | prototype done. Post-norm result is read off the plot, update when the writeup has final numbers |
+| 3 | RMSNorm and pre-norm, with no-norm and post-norm ablations | prototype done |
 | 4 | RoPE | not started |
 | 5 | Attention: scaled dot product, causal mask, multi-head | prototype done |
 | 6 | SwiGLU FFN | not started |
