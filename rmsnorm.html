@@ -140,14 +140,15 @@
       <button class="master">Mark mastered</button>
     </div>
     <div class="node-body"><div class="node-inner"><div class="node-pad">
-      <div class="stage">
-        <div class="steps" role="tablist" id="modes"></div>
-        <div class="step-formula" id="modeFormula"></div>
-        <div class="board">
-          <div class="grid c5" id="stream"></div>
-          <div class="inspect" id="inspectStream" aria-live="polite"></div>
+      <div class="stage" id="bars">
+        <div class="step-formula"><div id="barStep"></div><p>Bar height = RMS of the stream. Orange = growth in this layer.</p></div>
+        <div class="barrow" id="barrow"></div>
+        <div class="stage-foot">
+          <span class="kbd">← → change layer.</span>
+          <div class="nav"><button id="bPlay">Play</button><button id="bPrev">Back</button><button id="bNext">Next layer</button></div>
         </div>
       </div>
+      <details class="aside"><summary>Show vectors</summary><div class="pair" id="vecs"></div></details>
       <p class="toy"><b>Toy:</b> one token (cat), 4 sublayers. Every sublayer is the same fixed map \(F(x)=2Px\), where \(P\) shifts each dimension one place to the right, so \(\mathrm{RMS}(F(x))=2\,\mathrm{RMS}(x)\). \(g=1\).<br><b>Yours:</b> 4 blocks, so 8 sublayers, each an attention or a SwiGLU with learned weights.</p>
 
       <div class="sub">Ablation 1: layer normalization</div>
@@ -358,32 +359,46 @@ console.assert(rms(MODES[2].xs[LAYERS]) > 3 * rms(MODES[0].xs[LAYERS]), "no-norm
 
 // size of the sublayer's output relative to the stream it is added to
 const upd = (m, l) => rms(F(m === MODES[0] ? norm(m.xs[l - 1]) : m.xs[l - 1])) / rms(m.xs[l - 1]);
-let mode = 0, layer = 1;
-MODES.forEach((m, i) => {
-  const b = document.createElement("button");
-  b.textContent = m.name; b.setAttribute("role", "tab");
-  b.onclick = () => { mode = i; renderStream(); };
-  $("modes").append(b);
-});
-$("stream").onclick = e => { const b = e.target.closest(".row"); if (b) { layer = +b.dataset.l; renderStream(); } };
-function renderStream() {
-  const m = MODES[mode], v = a => `[${a.map(f).join(", ")}]`;
-  [...$("modes").children].forEach((b, i) => b.setAttribute("aria-selected", i === mode));
-  $("modeFormula").innerHTML = `<div>${katex.renderToString(m.tex, { displayMode: false })}</div><p>${m.note} Pick a layer.</p>`;
-  $("stream").innerHTML = `<div class="corner">layer ↓<br>dim →</div>` + [1, 2, 3, 4].map(d => `<div class="col">dim ${d}</div>`).join("") + `<div class="col">RMS</div>` +
-    m.xs.map((x, l) => `<button class="row" data-l="${l}" aria-pressed="${l === layer}"${l ? "" : " disabled"}>x<sub>${l}</sub></button>` +
-      x.map(val => `<div class="cell${val / TOP > 0.55 ? " hot" : ""}${l === layer ? " inline" : ""}" style="--t:${(val / TOP).toFixed(3)}">${f(val)}</div>`).join("") +
-      `<div class="cell plain">${f(rms(x))}</div>`).join("") +
-    `<div class="row">final</div>` + norm(m.xs[LAYERS]).map(val => `<div class="cell" style="--t:${(val / TOP).toFixed(3)}">${f(val)}</div>`).join("") + `<div class="cell plain">${f(1)}</div>`;
-  const x = m.xs[layer - 1], n = norm(x);
-  const lines = mode === 0 ? [`Norm(x<sub>${layer - 1}</sub>) = ${v(x)} / ${f(rms(x))} = ${v(n)}`, `F(Norm(x<sub>${layer - 1}</sub>)) = 2 × shift = ${v(F(n))}`, `x<sub>${layer}</sub> = ${v(x)} + ${v(F(n))} = <b>${v(m.xs[layer])}</b>`]
-    : mode === 1 ? [`F(x<sub>${layer - 1}</sub>) = 2 × shift = ${v(F(x))}`, `u = x<sub>${layer - 1}</sub> + F(x<sub>${layer - 1}</sub>) = ${v(add(x, F(x)))}`, `x<sub>${layer}</sub> = u / RMS(u) = u / ${f(rms(add(x, F(x))))} = <b>${v(m.xs[layer])}</b>`]
-    : [`F(x<sub>${layer - 1}</sub>) = 2 × shift = ${v(F(x))}`, `x<sub>${layer}</sub> = ${v(x)} + ${v(F(x))} = <b>${v(m.xs[layer])}</b>`];
-  $("inspectStream").innerHTML = `<h4>x<sub>${layer - 1}</sub> → x<sub>${layer}</sub></h4><div class="calc">${lines.join("<br>")}</div>
-    <p class="defs">update ÷ stream = ${f(upd(m, layer))}.<br>RMS: ${f(rms(x))} → <b>${f(rms(m.xs[layer]))}</b>. After ${LAYERS} layers: ${f(rms(m.xs[LAYERS]))}.<br>final = Norm(x<sub>${LAYERS}</sub>), what the LM head sees.</p>`;
+// bars: one per variant, height = RMS of the stream after `layer` sublayers
+const TOPR = Math.max(...MODES.map(m => rms(m.xs[LAYERS])));
+let layer = 0, timer = null;
+function initBars() {
+  $("barrow").innerHTML = MODES.map(m => `<div class="barcol"><div class="barbox"><div class="bar new"></div><div class="bar old"></div><div class="barnum"></div></div>
+    <h5>${m.name}</h5><div class="barf">${katex.renderToString(m.tex)}</div><p class="barnote"></p></div>`).join("");
+  $("vecs").innerHTML = MODES.map(m => `<table class="blend"><tr><th>${m.name}</th><th colspan="4"></th><th>RMS</th></tr>${
+    [...m.xs, norm(m.xs[LAYERS])].map((x, l) => `<tr><td>${l > LAYERS ? "final" : `x<sub>${l}</sub>`}</td>${x.map(v => `<td>${f(v)}</td>`).join("")}<td class="w">${f(rms(x))}</td></tr>`).join("")}</table>`).join("");
+  renderBars();
 }
+function renderBars() {
+  $("barStep").innerHTML = layer ? `After sublayer ${layer} of ${LAYERS}` : "Input x<sub>0</sub>, before any sublayer";
+  [...$("barrow").children].forEach((col, i) => {
+    const m = MODES[i], now = rms(m.xs[layer]), prev = layer ? rms(m.xs[layer - 1]) : now;
+    col.querySelector(".new").style.setProperty("--s", now / TOPR);
+    col.querySelector(".old").style.setProperty("--s", Math.min(prev, now) / TOPR);
+    const num = col.querySelector(".barnum");
+    num.textContent = f(now); num.style.setProperty("--s", now / TOPR);
+    col.querySelector(".barnote").textContent = !layer ? "start" :
+      `adds RMS ${f(upd(m, layer) * prev)}, ${f(upd(m, layer))}× the stream` + (i === 1 ? ", then reset to 1" : "");
+  });
+  $("bPrev").disabled = layer === 0; $("bNext").disabled = layer === LAYERS;
+  $("bPlay").textContent = timer ? "Pause" : "Play";
+}
+function stop() { clearInterval(timer); timer = null; }
+function setLayer(l) { layer = Math.max(0, Math.min(LAYERS, l)); if (layer === LAYERS) stop(); renderBars(); }
+$("bPrev").onclick = () => { stop(); setLayer(layer - 1); };
+$("bNext").onclick = () => { stop(); setLayer(layer + 1); };
+$("bPlay").onclick = () => {
+  if (timer) { stop(); renderBars(); return; }
+  if (layer === LAYERS) layer = 0;
+  timer = setInterval(() => setLayer(layer + 1), 900);
+  renderBars();
+};
+$("bars").addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { stop(); setLayer(layer + 1); e.preventDefault(); }
+  if (e.key === "ArrowLeft") { stop(); setLayer(layer - 1); e.preventDefault(); }
+});
 
-window.addEventListener("DOMContentLoaded", () => { render(); renderStream(); });
+window.addEventListener("DOMContentLoaded", () => { render(); initBars(); });
 </script>
 </body>
 </html>

@@ -215,4 +215,16 @@ details.aside .derive { margin-top: 10px; color: var(--ink); }
 .prose .katex-display > .katex { text-align: left; font-size: 0.95em; }
 .prose + .plot { margin-top: 0; } .plot + .prose { margin-top: 16px; }
 .ex { font-family: var(--mono); font-size: 13.5px; line-height: 1.9; white-space: pre; overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 0 0 16px; }
+/* bar stage: one bar per variant, scaled with transform so growth animates on the compositor */
+.barrow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 34px; }
+.barbox { position: relative; height: 240px; border-bottom: 1px solid var(--ink); }
+.bar { position: absolute; left: 50%; bottom: 0; width: 72px; margin-left: -36px; height: 100%; transform-origin: bottom; transform: scaleY(var(--s, 0)); transition: transform 300ms var(--ease-out); }
+.bar.new { background: var(--query); }
+.bar.old { background: var(--heat); }
+.barnum { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; transform: translateY(calc(var(--s, 0) * -240px)); transition: transform 300ms var(--ease-out); }
+.barcol h5 { margin: 10px 0 2px; font-size: 14px; font-weight: 600; text-align: center; }
+.barf, .barnote { margin: 2px 0 0; text-align: center; font-size: 13px; color: var(--muted); }
+.barf { overflow-x: auto; overflow-y: hidden; }
+@media (max-width: 860px) { .bar { width: 44px; margin-left: -22px; } .barf { font-size: 11px; } }
+@media (prefers-reduced-motion: reduce) { .bar, .barnum { transition: none; } }
 mark { background: color-mix(in oklab, var(--query) 16%, transparent); color: var(--ink); padding: 1px 2px; border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
