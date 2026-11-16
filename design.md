@@ -1,95 +1,120 @@
-# LLM 学习网页 - 设计
+# LLM notebook - design
 
-## 为什么做
+Living document. Update it whenever a decision or a chapter's status changes.
 
-学过的 ML / LLM 内容分散在 codebase、粗糙笔记和 cs336 作业里，文字太多，容易忘，也很难直接 pick up。目标是让学习复利：一个月后打开网页，能把某个主题重新推导一遍。
+## Why this exists
 
-## 目标
+Yikai's ML and LLM learning is scattered across codebases, rough notes, and the cs336 assignments. Too much text, easy to forget, hard to pick back up. The goal is compounding: open the page a month later and be able to re-derive a topic.
 
-- 以推导为主线，每个主题都能从头推到尾。
-- 每个主题配 end to end 的可视化例子，例如 attention 的 weight matrix 在每一步怎么变化。
-- 覆盖全面，沿 cs336 a1 的整条线。
-- 有明确的节点，可以跳过已经 confident 的内容。
-- UI 质量高，按 Emil Kowalski 的设计和动效规范做。
+## Goals
 
-## 不做
+- Derivation first. Every topic can be derived start to finish.
+- Each topic has an end to end worked example with visualization, for example how the attention weight matrix changes at each step.
+- Comprehensive, following the full cs336 assignment 1 pipeline.
+- Clear nodes, so confident material can be skipped.
+- High UI quality.
 
-- 不用真实模型的 tensor。
-- 不在浏览器里跑真实模型。
-- 第一期不做 `ml-engineering` 的硬件和性能内容，只在 resource accounting 处引用。
-- 不做编辑器、搜索、账号、后端。
+## Non-goals
 
-## 失败的样子
+- No real model tensors. No running a real model in the browser.
+- No hardware and performance content from `ml-engineering` in phase one, except as a reference in resource accounting.
+- No editor, search, accounts, or backend.
 
-- 又变成一堵文字墙。
-- 可视化只是装饰，数字对不上推导。
-- 动效花哨，拖慢阅读。
+## What failure looks like
 
-## Fidelity 的判断(我的决定)
+- A wall of text.
+- Visualization that is decoration, with numbers that do not match the derivation.
+- Flashy motion that slows reading.
+- Prose that reads as AI-generated.
 
-| 内容 | Fidelity | 原因 |
+## Current state
+
+- One chapter exists: Attention, in a single `index.html` (no build step).
+- Live at https://ym820.github.io/llm-notebook/. GitHub Pages publishes the root of `main`, so a push to `main` deploys.
+- Multi-head attention is not in the Attention chapter yet.
+- The single-file prototype is deliberate while the format is still being revised. Migrating to a multi-page setup (Astro + MDX was the original idea) is an open decision for when a second chapter is added. Ask before migrating.
+
+## Chapter structure
+
+Each chapter has five nodes. Each node can be collapsed and marked mastered. Progress is stored in `localStorage`.
+
+1. **Intuition**: a few labeled lines.
+2. **Derivation**: numbered steps, each a name plus a formula with shapes. The "why" is collapsed behind a toggle.
+3. **Worked example**: a stepper over one small matrix. Clicking a cell shows its arithmetic.
+4. **Code**: one row per step, comparing Yikai's line with a reference line.
+5. **Self-check**: three questions with hidden answers, and a button to mark the chapter mastered. A "Test me first" link at the top jumps here.
+
+## Conventions
+
+### Language and writing
+
+- Page content is in English.
+- Follow the `executable-lecture-prose` skill: one idea per line, claim first, bold labeled lead-ins (Goal, Query, Score, ...), numbers instead of adjectives.
+- Text budget: each step caption is at most 12 words. Intuition is a handful of lines.
+- No template-generated explanation sentences in the UI. Let the formula, the numbers, and highlighting carry it.
+- No metaphorical headings. Use symbols, for example `S[sat, cat]`.
+- Sentence case. No em dashes.
+
+### Fidelity
+
+| Content | Fidelity |
+|---|---|
+| Derivation | Complete and exact, with shapes. Notation matches Yikai's `model.py`. |
+| Example numbers | Hand-picked toy inputs (about 4 tokens, d = 4), but computed for real by JS in the page, so every step matches the formula. |
+| Example inputs | Chosen so the pattern is obvious. |
+| Dimensions | Abstract: dim 1 to dim 4. Do not give them semantic names. |
+| Code | Real lines from Yikai's repo and from the reference. |
+| Experiment results | Real numbers and curves from the cs336 writeup. |
+| Toy vs real gap | One note per example, for example "here d_k = 4, your model has d_k = 32". |
+
+One sentence runs through every chapter: "the cat sat down". Each chapter shows what happens to it at that stage.
+
+Every symbol used in the example must be defined where it appears (for example what `A[down, j]` and `v_j` are).
+
+### Code node
+
+- One row per step. Left label is the step name used in the worked example, with the formula as small text under it.
+- Under each step, full-width lines stacked: `mine`, then the reference, tagged by source (`nanoGPT`, `PyTorch`).
+- Python highlighting with highlight.js, plus a small pass that colors call names. Colors come from the page's own tokens.
+- Keep Yikai's code. It is the from-scratch version that passed the tests. The reference shows what practice looks like.
+- Choose the reference per chapter and read the actual source first. For Attention it is `karpathy/nanoGPT` `model.py` plus `F.scaled_dot_product_attention`. `karpathy/nanochat` was rejected for Attention because its current code adds value residual, QK norm, and KV cache. nanoGPT has no RoPE or RMSNorm, so those chapters need another reference.
+
+### UI
+
+- Use Emil Kowalski's skills (`emil-design-eng`, `animate`, `choreograph`, `animation-performance`, `review-animations`) and `frontend-design`.
+- Tokens are CSS variables on `:root`, with a dark mode block. Fonts: IBM Plex Sans (UI and text), IBM Plex Mono (numbers and code), Source Serif 4 (chapter title only).
+- Motion only where it shows a state change. Under 300ms, custom ease-out, respect `prefers-reduced-motion`.
+- Math with KaTeX from cdnjs.
+
+## Chapters
+
+| # | Chapter | Status |
 |---|---|---|
-| 推导 | 完整、精确，带 shape 标注，符号和你的 `model.py` 一致 | 这是你要 pick up 的核心 |
-| 可视化的数字 | 手工设计的小例子(约 4 个 token、d=4)，但由页面里的小段 JS 真实计算 | 小到能一眼看完，同时每一步数字都对得上公式，softmax 每行确实加起来是 1 |
-| 例子的输入 | 人为挑选，让模式明显(例如某个 token 明显关注另一个) | 真实 tensor 是噪声，看不出东西 |
-| 代码 | 你 repo 里的真实片段 | 把推导和你写过的东西连起来 |
-| 实验结果 | writeup 里的真实数字和曲线 | 这部分真实值本身就是结论 |
-| 玩具与真实的差距 | 每处标注一行，例如"这里 d=4，你的模型是 512" | 避免把玩具当成真的 |
+| 0 | Overview: one sentence through the whole model | not started |
+| 1 | BPE: encoding and training | not started |
+| 2 | Embedding | not started |
+| 3 | RMSNorm and pre-norm | not started |
+| 4 | RoPE | not started |
+| 5 | Attention: scaled dot product, causal mask, multi-head | prototype done, multi-head missing |
+| 6 | SwiGLU FFN | not started |
+| 7 | Transformer block and residual stream | not started |
+| 8 | LM head, cross entropy, perplexity | not started |
+| 9 | AdamW, LR schedule, gradient clipping | not started |
+| 10 | Training and experiments: LR sweep, batch size, ablations | not started |
+| 11 | Decoding: temperature, top-p | not started |
+| 12 | Resource accounting: parameters, FLOPs, memory | not started |
 
-全站用同一句短句贯穿所有章节，每章展示它在这一步变成了什么。
+## Source material
 
-## 页面结构
+- `~/Desktop/cs336/assignments/assignment1-basics`: `cs336_basics/model.py` and the other modules, `notes/bpe_tokenization.md`, `notes/bpe_training.md`, `assignment1-writeup.md`, `experiment-plan.md`. Base config: `context_length=256`, `d_model=512`, `num_heads=16`, `num_layers=4`, `d_ff=1344`, `vocab_size=10000`.
+- `~/Desktop/learning/ml-engineering`: Stas Bekman's book plus Yikai's video plan. Hardware and performance, for a later phase.
+- `~/Desktop/learning/llm-notes`: not reviewed yet.
 
-```
-┌──────────────────────────────────────────────────────────┐
-│ 地图: tokens → embed → norm → RoPE → [attention] → FFN … │
-├──────────────────────────────────────────────────────────┤
-│ Attention                                    3/5 已掌握  │
-│                                                          │
-│ ● 1 直觉                              [已掌握，折叠]     │
-│ ● 2 推导: QKᵀ/√d → mask → softmax → ·V                   │
-│ ● 3 例子:  [Q] [K]  →  score 矩阵  ‹ 上一步  下一步 ›    │
-│            同一个 4×4 矩阵随步骤变化，hover 看单个格子   │
-│            的算式                                        │
-│ ○ 4 你的代码: scaled_dot_product_attention               │
-│ ○ 5 自测: 不看上面，回答 3 个问题 → 可标记整章已掌握     │
-└──────────────────────────────────────────────────────────┘
-```
+## Adding a chapter
 
-- 每章固定五个节点：直觉、推导、例子、代码、自测。
-- 每个节点可手动标记"已掌握"并折叠。自测放在最前面也能点开，答得出就直接跳过整章。
-- 进度存在浏览器本地。
-
-## 章节(第一期)
-
-0. 全景：一句话走完整个模型
-1. BPE：encoding 和 training
-2. Embedding
-3. RMSNorm 和 pre-norm
-4. RoPE
-5. Attention：scaled dot product、causal mask、multi-head
-6. SwiGLU FFN
-7. Transformer block 和 residual stream
-8. LM head、cross entropy、perplexity
-9. AdamW、LR schedule、gradient clipping
-10. 训练和实验：LR sweep、batch size、ablation
-11. Decoding：temperature、top-p
-12. Resource accounting：参数量、FLOPs、显存
-
-## 做法
-
-考虑过三种：
-
-- **A. 静态站点，内容手写，可视化在页面里用小例子计算(选这个)**。Astro + MDX，可视化是 React 组件，公式用 KaTeX，动效用 Motion。
-- B. 从你的代码导出真实 tensor。你已否决。
-- C. 单个 HTML 文件。十三章加公式和代码高亮，很快就难维护。
-
-## 顺序
-
-1. 先只做 Attention 一章，把节点结构、矩阵可视化组件和整体 UI 定下来，给你看。
-2. 你认可后，按模型顺序补其余章节，复用同一套组件。
-
-## 留给实现的
-
-- 贯穿全站的那句话具体是什么。
-- 视觉风格的具体取值(字体、颜色、间距)，在第 1 步的成品上给你看。
+1. Read the matching code and notes in the source material.
+2. Pick and read the reference implementation.
+3. Write the five nodes following the conventions above, reusing the Attention chapter's components.
+4. Verify in the browser: no console errors, math renders, every number in the example matches the formula.
+5. Update the chapter table here.
+6. Commit, then push as a separate command.
