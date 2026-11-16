@@ -215,3 +215,4 @@ details.aside .derive { margin-top: 10px; color: var(--ink); }
 .prose .katex-display > .katex { text-align: left; font-size: 0.95em; }
 .prose + .plot { margin-top: 0; } .plot + .prose { margin-top: 16px; }
 .ex { font-family: var(--mono); font-size: 13.5px; line-height: 1.9; white-space: pre; overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 0 0 16px; }
+mark { background: color-mix(in oklab, var(--query) 16%, transparent); color: var(--ink); padding: 1px 2px; border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
