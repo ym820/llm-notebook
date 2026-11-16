@@ -150,24 +150,37 @@
       </div>
       <p class="toy"><b>Toy:</b> one token (cat), 4 sublayers. Every sublayer is the same fixed map \(F(x)=2Px\), where \(P\) shifts each dimension one place to the right, so \(\mathrm{RMS}(F(x))=2\,\mathrm{RMS}(x)\). \(g=1\).<br><b>Yours:</b> 4 blocks, so 8 sublayers, each an attention or a SwiGLU with learned weights.</p>
 
-      <div class="sub">Trade-offs</div>
-      <table class="cmp">
-        <tr><th></th><th>Stream size after \(L\) sublayers</th><th>Gradient to an early layer</th><th>Cost</th><th>Used by</th></tr>
-        <tr><td><b>No norm</b></td><td>up to \((1+k)^L\,\|x_0\|\)</td><td>identity path, but nothing bounds the rest</td><td>only a small LR trains</td><td></td></tr>
-        <tr><td><b>Post-norm</b></td><td>RMS 1 at every layer</td><td>crosses every norm above it</td><td>sensitive to LR, needs warm-up</td><td>original Transformer (2017), BERT</td></tr>
-        <tr><td><b>Pre-norm</b></td><td>grows, at most linearly in \(L\)</td><td>identity path, sublayer inputs bounded</td><td>one extra final norm</td><td>GPT-2, Llama, your model</td></tr>
-      </table>
+      <div class="sub">No norm</div>
       <div class="lines">
-        <p><b>Modern LLMs use pre-norm</b>, not post-norm. Post-norm is the 2017 design.</p>
-        <p><b>Why pre-norm wins</b>: it trains at a wide range of LRs and depths. Yours: 1.36 at LR 1e-2, where post-norm stalls near 6.</p>
-        <p><b>What pre-norm gives up</b>: the stream grows, so a later sublayer's update is a smaller share of it. Toy: update ÷ stream is <span id="rel1"></span> at layer 1 and <span id="rel4"></span> at layer 4.</p>
-        <p><b>What post-norm keeps</b>: every sublayer changes the stream by the same share. At a safe LR it matches pre-norm. Yours at 3e-3: almost the same curve.</p>
-        <p><b>Why no norm loses</b>: the stream's size is set by the weights alone, so one large step can blow it up. Yours: NaN at 1e-3 and above.</p>
+        <p><b>Rule</b>: \(x \leftarrow x + F(x)\). Nothing ever resets the size of \(x\).</p>
+        <p><b>Forward</b>: a sublayer's output is proportional to its input, so sizes multiply. Toy RMS per layer: <span id="seqNo"></span>.</p>
+        <p><b>Feedback loop</b>: the gradient of a weight is proportional to the activation it multiplies. Larger weights give larger activations, then larger gradients, then a larger weight update.</p>
+        <p><b>In training</b>: a high LR starts that loop. Yours: NaN at 3e-3 and 1e-3, stuck near 7.46 at 3e-4, trains only at 1e-4.</p>
+        <p><b>Verdict</b>: trains only at an LR 30× below the baseline's best, and is worse even there (2.08 vs 1.80 at the same LR).</p>
       </div>
-      <details class="aside"><summary>Sources</summary>Post-norm with warm-up: Vaswani et al. 2017. Norm moved to the sublayer input plus a final norm: GPT-2, Radford et al. 2019.<br>Post-norm gradients at initialization and why it needs warm-up: Xiong et al. 2020, "On Layer Normalization in the Transformer Architecture".<br>Post-norm can end better than pre-norm when it trains: Liu et al. 2020, "Understanding the Difficulty of Training Transformers".</details>
 
-      <div class="sub">No norm: why it blows up</div>
-      <p class="toy">Your <code class="i">no_norm</code> removes the two block norms. <code class="i">ln_final</code> still runs.</p>
+      <div class="sub">Post-norm</div>
+      <div class="lines">
+        <p><b>Rule</b>: \(x \leftarrow \mathrm{Norm}(x + F(x))\). The size is reset after every sublayer.</p>
+        <p><b>Forward</b>: solved. Toy RMS per layer: <span id="seqPost"></span>.</p>
+        <p><b>Backward</b>: the "+" sits inside the norm. A gradient going down is rescaled by a norm at every sublayer, 8 times in your model. No route avoids them.</p>
+        <p><b>Known problem</b>: at the start of training, gradients for the layers near the output are large (Xiong et al. 2020). Large gradient × large LR = unstable first steps. This is why the 2017 Transformer needs LR warm-up.</p>
+        <p><b>In training</b>: fine at a moderate LR, fragile at a high one. Yours: almost the baseline curve at 3e-3, stuck near 6 at 1e-2.</p>
+        <p><b>Verdict</b>: works, but the usable LR range is narrower.</p>
+      </div>
+
+      <div class="sub">Pre-norm</div>
+      <div class="lines">
+        <p><b>Rule</b>: \(x \leftarrow x + F(\mathrm{Norm}(x))\). Only the sublayer's input is normalized.</p>
+        <p><b>Forward</b>: the sublayer always sees RMS 1, so its output has a bounded size. The stream grows by adding, not multiplying. Toy RMS per layer: <span id="seqPre"></span>.</p>
+        <p><b>Backward</b>: the "+" is outside the norm. It copies the gradient straight down to every layer, with no norm on that route.</p>
+        <p><b>In training</b>: stable across LRs. Yours: 1.34 at 3e-3 and 1.36 at 1e-2.</p>
+        <p><b>Cost 1</b>: the stream is never normalized, so one extra norm is needed before the LM head.</p>
+        <p><b>Cost 2</b>: the stream keeps growing, so later sublayers change it less. Toy: update ÷ stream falls from <span id="rel1"></span> at layer 1 to <span id="rel4"></span> at layer 4.</p>
+        <p><b>Verdict</b>: the default in GPT-2, Llama, and your model. A forgiving LR and easy depth are worth more than the two costs.</p>
+      </div>
+
+      <details class="aside"><summary>Formal version: no norm</summary>
       <ol class="derive">
         <li><div>
           <div class="what">With norm, an update cannot depend on the stream's size</div>
@@ -185,25 +198,8 @@
           <div class="why">Large scores push softmax to one-hot, the same failure \(\sqrt{d_k}\) guards against.</div>
         </div></li>
       </ol>
-      <div class="sub">Your result: no norm</div>
-      <table class="blend">
-        <tr><th>No norm, LR</th><th>Outcome</th></tr>
-        <tr><td>3e-3</td><td>NaN</td></tr>
-        <tr><td>1e-3</td><td>NaN</td></tr>
-        <tr><td>3e-4</td><td>stalls near 7.46</td></tr>
-        <tr><td>1e-4</td><td>trains</td></tr>
-      </table>
-      <img class="plot" src="img/no-norm-lr-comparison.png" alt="Validation loss for the model without norm at four learning rates. Only 1e-4 decreases steadily." loading="lazy">
-      <table class="blend">
-        <tr><th>Model</th><th>Val loss</th></tr>
-        <tr><td>Best baseline, LR 3e-3</td><td>1.3387</td></tr>
-        <tr><td>Baseline, LR 1e-4</td><td>1.8004</td></tr>
-        <tr><td>No norm, LR 1e-4</td><td>2.0827</td></tr>
-      </table>
-      <img class="plot" src="img/no-norm_ablation.png" alt="Validation loss: no norm at 1e-4 stays above the baseline at 1e-4, which stays above the baseline at 3e-3." loading="lazy">
-      <p class="toy">Of the 0.74 gap to the best baseline: about 0.46 comes from the lower LR, about 0.28 from removing the norm.</p>
-
-      <div class="sub">Post-norm vs pre-norm: the gradient path</div>
+      </details>
+      <details class="aside"><summary>Formal version: gradient path, post-norm vs pre-norm</summary>
       <ol class="derive">
         <li><div>
           <div class="what">Forward: the stream is renormalized after every sublayer</div>
@@ -226,7 +222,28 @@
           <details class="aside"><summary>Why</summary>From \(y_i=g_i u_i/r\) with \(r=\mathrm{RMS}(u)\) and \(\partial r/\partial u_j=u_j/(d_{model}\,r)\).<br>Two effects: it rescales the gradient by \(1/\mathrm{RMS}(u)\), and it removes the component along \(u\), since \(J_{\mathrm{Norm}}(u)\,u=0\).<br>Reference: Xiong et al. 2020, "On Layer Normalization in the Transformer Architecture".</details>
         </div></li>
       </ol>
-      <div class="sub">Your result: post-norm</div>
+      </details>
+      <details class="aside"><summary>Sources</summary>Post-norm with warm-up: Vaswani et al. 2017. Norm moved to the sublayer input, plus a final norm: GPT-2, Radford et al. 2019.<br>Large gradients near the output in post-norm at initialization: Xiong et al. 2020, "On Layer Normalization in the Transformer Architecture".</details>
+
+      <div class="sub">Your runs: no norm</div>
+      <table class="blend">
+        <tr><th>No norm, LR</th><th>Outcome</th></tr>
+        <tr><td>3e-3</td><td>NaN</td></tr>
+        <tr><td>1e-3</td><td>NaN</td></tr>
+        <tr><td>3e-4</td><td>stalls near 7.46</td></tr>
+        <tr><td>1e-4</td><td>trains</td></tr>
+      </table>
+      <img class="plot" src="img/no-norm-lr-comparison.png" alt="Validation loss for the model without norm at four learning rates. Only 1e-4 decreases steadily." loading="lazy">
+      <table class="blend">
+        <tr><th>Model</th><th>Val loss</th></tr>
+        <tr><td>Best baseline, LR 3e-3</td><td>1.3387</td></tr>
+        <tr><td>Baseline, LR 1e-4</td><td>1.8004</td></tr>
+        <tr><td>No norm, LR 1e-4</td><td>2.0827</td></tr>
+      </table>
+      <img class="plot" src="img/no-norm_ablation.png" alt="Validation loss: no norm at 1e-4 stays above the baseline at 1e-4, which stays above the baseline at 3e-3." loading="lazy">
+      <p class="toy">Of the 0.74 gap to the best baseline: about 0.46 comes from the lower LR, about 0.28 from removing the norm.</p>
+
+      <div class="sub">Your runs: post-norm</div>
       <table class="blend">
         <tr><th>LR</th><th>Pre-norm (baseline)</th><th>Post-norm</th></tr>
         <tr><td>3e-3</td><td>1.3387</td><td>slightly above baseline at every eval</td></tr>
@@ -361,6 +378,8 @@ console.assert(rms(MODES[2].xs[LAYERS]) > 3 * rms(MODES[0].xs[LAYERS]), "no-norm
 
 // size of the sublayer's output relative to the stream it is added to
 const upd = (m, l) => rms(F(m === MODES[0] ? norm(m.xs[l - 1]) : m.xs[l - 1])) / rms(m.xs[l - 1]);
+const seq = m => m.xs.map(x => f(rms(x))).join(" → ");
+$("seqPre").textContent = seq(MODES[0]); $("seqPost").textContent = seq(MODES[1]); $("seqNo").textContent = seq(MODES[2]);
 $("rel1").textContent = f(upd(MODES[0], 1)); $("rel4").textContent = f(upd(MODES[0], LAYERS));
 let mode = 0, layer = 1;
 MODES.forEach((m, i) => {

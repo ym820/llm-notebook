@@ -204,3 +204,5 @@ div.cell { display: grid; place-items: center; }
 .cmp tr:first-child th { border-top: 0; }
 .cmp td:first-child { white-space: nowrap; }
 .node-pad > .lines { margin-bottom: 10px; }
+.lines span[id] { font-family: var(--mono); font-size: 0.9em; }
+details.aside .derive { margin-top: 10px; color: var(--ink); }
