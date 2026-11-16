@@ -204,7 +204,9 @@ div.cell { display: grid; place-items: center; }
 .cmp tr:first-child th { border-top: 0; }
 .cmp td:first-child { white-space: nowrap; }
 .node-pad > .lines { margin-bottom: 10px; }
-.lines span[id], .prose span[id] { font-family: var(--mono); font-size: 0.9em; }
+.lines span[id] { font-family: var(--mono); font-size: 0.9em; }
 details.aside .derive { margin-top: 10px; color: var(--ink); }
 .node-pad > .prose { margin-top: 18px; }
 .sub + .prose { margin-top: 0; }
+.report { max-width: 72ch; }
+.report p { margin-bottom: 10px; }
